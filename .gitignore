@@ -1,0 +1,33 @@
+# 运行数据（用户内容，绝不入库）
+config.json
+rooms.json
+downloads/
+logs/
+preview/
+直播间列表.txt
+_userlist.txt
+
+# 构建产物
+dist/
+dist2/
+.build/
+*.spec
+
+# 调试/临时文件
+_*.log
+_*.ts
+_*.mp4
+_*.html
+_player.js
+_dy_*
+_geom_shot.png
+_popout_shot.png
+_pip_shot.png
+_md3_*
+_shot_main.png
+icon_preview.png
+
+# Python
+__pycache__/
+*.pyc
+.venv/
