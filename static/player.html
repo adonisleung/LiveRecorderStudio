@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>直播预览</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;background:#000;overflow:hidden;font-family:"Segoe UI","Microsoft YaHei",sans-serif}
+  video{width:100%;height:100%;object-fit:contain;background:#000;display:block;cursor:default}
+
+  /* 悬浮控制条：只留 3 个图标按钮，整条可拖动窗口 */
+  .hud{position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:20;
+    display:flex;align-items:center;gap:2px;padding:5px;
+    border-radius:999px;background:rgba(18,22,28,.78);backdrop-filter:blur(14px);
+    -webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.08);
+    transition:opacity .25s ease,transform .25s ease;cursor:move;user-select:none}
+  .hud.idle{opacity:0;transform:translateX(-50%) translateY(-8px);pointer-events:none}
+  .hud button{width:30px;height:30px;border:0;border-radius:50%;background:transparent;
+    color:#cfd8e3;cursor:pointer;display:grid;place-items:center;transition:background .15s,color .15s}
+  .hud button:hover{background:rgba(255,255,255,.13);color:#fff}
+  .hud button.close:hover{background:rgba(248,113,113,.85);color:#fff}
+  .hud button svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.9;
+    stroke-linecap:round;stroke-linejoin:round}
+
+  /* 右下角缩放手柄：无边框窗口靠它拉伸 */
+  .grip{position:fixed;right:0;bottom:0;z-index:25;width:22px;height:22px;cursor:nwse-resize;
+    opacity:.35;transition:opacity .15s}
+  .grip:hover{opacity:.9}
+  .grip::after{content:"";position:absolute;right:4px;bottom:4px;width:12px;height:12px;
+    border-right:2px solid #fff;border-bottom:2px solid #fff;border-radius:0 0 3px 0}
+
+  /* 中央小徽标 */
+  .mid{position:fixed;inset:0;display:grid;place-items:center;z-index:15;pointer-events:none}
+  .badge{padding:9px 16px;border-radius:999px;background:rgba(18,22,28,.85);color:#e8edf3;
+    font-size:12.5px;letter-spacing:.3px;opacity:0;transition:opacity .3s;display:flex;
+    align-items:center;gap:8px;border:1px solid rgba(255,255,255,.08)}
+  .badge.show{opacity:1}
+  .badge svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.9;
+    stroke-linecap:round;stroke-linejoin:round}
+
+  .overlay{position:fixed;inset:0;z-index:30;display:none;place-items:center;
+    background:rgba(0,0,0,.55)}
+  .overlay.show{display:grid}
+  .card{width:min(360px,86vw);padding:24px 22px 20px;border-radius:20px;text-align:center;
+    background:#141a21;border:1px solid rgba(255,255,255,.09);box-shadow:0 24px 64px rgba(0,0,0,.55)}
+  .card h3{font-size:14.5px;color:#e8edf3;font-weight:600}
+  .card p{margin:9px 0 18px;font-size:12px;line-height:1.7;color:#8b95a3;word-break:break-all}
+  .card .btns{display:flex;gap:10px;justify-content:center}
+  .card button{min-width:88px;padding:9px 16px;border:0;border-radius:999px;font-size:12.5px;
+    font-weight:600;cursor:pointer;transition:filter .15s,background .15s}
+  .card button.p{background:#4de0cb;color:#04211c}
+  .card button.p:hover{filter:brightness(1.08)}
+  .card button.g{background:rgba(255,255,255,.08);color:#cfd8e3}
+  .card button.g:hover{background:rgba(255,255,255,.14)}
+
+  .spin{width:20px;height:20px;border:2.4px solid rgba(255,255,255,.15);border-top-color:#4de0cb;
+    border-radius:50%;animation:sp .8s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<video id="v" muted playsinline preload="none"></video>
+
+<div class="hud" id="hud">
+  <button id="btnMute" title="声音 (M)" onmousedown="event.stopPropagation()">
+    <svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="m16 9 5 6M21 9l-5 6" id="icoMuteX"/></svg>
+  </button>
+  <button id="btnFs" title="全屏 (F)" onmousedown="event.stopPropagation()">
+    <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+  </button>
+  <button id="btnClose" class="close" title="关闭 (Esc)" onmousedown="event.stopPropagation()">
+    <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+  </button>
+</div>
+
+<div class="grip" id="grip" title="拖动缩放" onmousedown="event.stopPropagation()"></div>
+
+<div class="mid"><div class="badge" id="badge"><span class="spin" id="badgeSpin"></span><span id="badgeText"></span></div></div>
+
+<div class="overlay show" id="overlay">
+  <div class="card">
+    <h3 id="ovTitle">正在解析直播流…</h3>
+    <p id="ovText">请稍候</p>
+    <div class="btns">
+      <button class="g" id="ovRetry" style="display:none">重试</button>
+      <button class="p" id="ovClose">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script src="/hls.min.js"></script>
+<script src="/flv.min.js"></script>
+<script>
+(function () {
+  const q = new URLSearchParams(location.search);
+  const rid = q.get('rid') || '';
+  const v = document.getElementById('v');
+  const hud = document.getElementById('hud');
+  const overlay = document.getElementById('overlay');
+  const badge = document.getElementById('badge');
+  // window.pywebview.api 是异步注入的（pywebviewready 之后才可用），
+  // 必须每次现取，不能在脚本加载时缓存成常量——否则所有 API 静默失效。
+  function apiObj() { return (window.pywebview && window.pywebview.api) || null; }
+  let hls = null, flv = null, destroyed = false, fullScr = false;
+  let idleTimer = null;
+
+  /* ---------- 控制条自动隐藏 ---------- */
+  function wake() {
+    hud.classList.remove('idle');
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => hud.classList.add('idle'), 2600);
+  }
+  window.addEventListener('mousemove', wake);
+  window.addEventListener('mousedown', wake);
+  wake();
+
+  /* ---------- 徽标 ---------- */
+  let badgeTimer = null;
+  function showBadge(text, spinner) {
+    document.getElementById('badgeText').textContent = text;
+    document.getElementById('badgeSpin').style.display = spinner ? '' : 'none';
+    badge.classList.add('show');
+    clearTimeout(badgeTimer);
+    if (!spinner) badgeTimer = setTimeout(() => badge.classList.remove('show'), 1300);
+  }
+  function hideBadge() { badge.classList.remove('show'); clearTimeout(badgeTimer); }
+
+  /* ---------- 错误遮罩 ---------- */
+  function showError(title, text, retry) {
+    document.getElementById('ovTitle').textContent = title;
+    document.getElementById('ovText').textContent = text || '';
+    document.getElementById('ovRetry').style.display = retry ? '' : 'none';
+    overlay.classList.add('show');
+  }
+  function hideOverlay() { overlay.classList.remove('show'); }
+
+  async function closeMe() {
+    destroyed = true;
+    // 在 Document PiP 小窗里（iframe）：直接关掉小窗本身
+    if (window.parent && window.parent !== window) {
+      try { window.parent.close(); return; } catch (e) {}
+    }
+    const a = apiObj();
+    if (a) {
+      try { await a.close(); return; } catch (e) {}
+    }
+    try {
+      await fetch('/api/popout/close', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({rid})
+      });
+    } catch (e) {}
+    window.close();
+  }
+
+  /* ---------- 声音 ---------- */
+  function setMuted(m) {
+    v.muted = m;
+    document.getElementById('icoMuteX').style.display = m ? '' : 'none';
+  }
+  document.getElementById('btnMute').onclick = () => {
+    setMuted(!v.muted);
+    showBadge(v.muted ? '静音' : '有声', false);
+  };
+
+  /* ---------- 全屏：走原生窗口 API（WebView2 的 requestFullscreen 被拦） ---------- */
+  async function toggleFs() {
+    const a = apiObj();
+    if (a) {
+      try { fullScr = await a.toggle_fullscreen(); return; } catch (e) {}
+    }
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen().catch(() => {});
+  }
+  document.getElementById('btnFs').onclick = toggleFs;
+  document.getElementById('btnClose').onclick = closeMe;
+  document.getElementById('ovClose').onclick = closeMe;
+  document.getElementById('ovRetry').onclick = () => { hideOverlay(); start(); };
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (fullScr && apiObj()) { apiObj().toggle_fullscreen(); fullScr = false; }
+      else if (document.fullscreenElement) document.exitFullscreen();
+      else closeMe();
+    } else if (e.key === 'm' || e.key === 'M') {
+      setMuted(!v.muted);
+      showBadge(v.muted ? '静音' : '有声', false);
+    } else if (e.key === 'f' || e.key === 'F') {
+      toggleFs();
+    }
+  });
+
+  /* 单击画面切换静音、双击全屏 */
+  let clickTimer = null;
+  v.addEventListener('click', () => {
+    clearTimeout(clickTimer);
+    clickTimer = setTimeout(() => { setMuted(!v.muted); showBadge(v.muted ? '静音' : '有声', false); }, 220);
+  });
+  v.addEventListener('dblclick', () => { clearTimeout(clickTimer); toggleFs(); });
+
+  /* ---------- 控制条拖动窗口（走 api.move_to，不碰 pywebview 的 window.move） ---------- */
+  hud.addEventListener('mousedown', (e) => {
+    if (e.target.closest('button')) return;
+    const a = apiObj();
+    if (!a) return;
+    e.preventDefault();
+    const sx = e.clientX, sy = e.clientY;
+    let base = null;
+    a.geometry().then(g => { base = g; }).catch(() => {});
+    const onMove = (ev) => {
+      if (!base) return;
+      a.move_to(base[0] + ev.clientX - sx, base[1] + ev.clientY - sy).catch(() => {});
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  });
+
+  /* ---------- 右下角拖拽缩放 ---------- */
+  const grip = document.getElementById('grip');
+  grip.addEventListener('mousedown', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const sx = e.clientX, sy = e.clientY;
+    const w0 = window.innerWidth, h0 = window.innerHeight;
+    const onMove = (ev) => {
+      const w = Math.max(360, w0 + ev.clientX - sx);
+      const h = Math.max(240, h0 + ev.clientY - sy);
+      const a = apiObj();
+      if (a) a.resize(w, h).catch(() => {});
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  });
+
+  /* ---------- 播放引擎：HLS(hls.js) → FLV(flv.js) → ffmpeg 短片兜底 ---------- */
+  function teardown() {
+    if (hls) { try { hls.destroy(); } catch (e) {} hls = null; }
+    if (flv) { try { flv.pause(); flv.unload(); flv.detachMediaElement(); flv.destroy(); } catch (e) {} flv = null; }
+    v.removeAttribute('src');
+    try { v.load(); } catch (e) {}
+  }
+
+  function playFile(url) {
+    teardown();
+    v.src = url + (url.includes('?') ? '&' : '?') + 't=' + Date.now();
+    v.loop = true;
+    v.play().catch(() => {});
+  }
+
+  async function playShortPreview() {
+    showBadge('生成短预览…', true);
+    const p = await fetch(`/api/rooms/${rid}/preview`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
+    }).then(r => r.json());
+    if (destroyed) return;
+    hideBadge();
+    if (!p.ok) { showError('预览失败', p.error || '无法生成预览', true); return; }
+    playFile(p.url);
+  }
+
+  /* 首帧后按视频宽高比调整窗口（竖屏直播变竖窗）；用户手动缩放过就不再动 */
+  let autoSized = false, userSized = false;
+  v.addEventListener('loadedmetadata', () => {
+    const a = apiObj();
+    if (autoSized || userSized || !v.videoWidth || !a) return;
+    autoSized = true;
+    const ar = v.videoWidth / v.videoHeight;
+    const sw = screen.availWidth || 1280, sh = screen.availHeight || 800;
+    let h = Math.round(Math.min(sh * 0.82, 1000));
+    let w = Math.round(h * ar);
+    if (w > sw * 0.9) { w = Math.round(sw * 0.9); h = Math.round(w / ar); }
+    a.resize(w, h).catch(() => {});
+  });
+  grip.addEventListener('mousedown', () => { userSized = true; });
+
+  async function start() {
+    if (!rid) { showError('缺少房间参数', '请从直播间详情里点「弹窗播放预览」打开', false); return; }
+    teardown();
+    hideOverlay();
+    showBadge('解析中…', true);
+    let res;
+    try {
+      res = await fetch(`/api/rooms/${rid}/stream`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
+      }).then(r => r.json());
+    } catch (e) {
+      if (!destroyed) showError('连接失败', e.message, true);
+      return;
+    }
+    if (destroyed) return;
+    hideBadge();
+    if (!res.ok) { showError('暂无法播放', res.error || '解析失败', true); return; }
+
+    try { document.title = (res.anchor ? res.anchor + ' · ' : '') + '直播预览'; } catch (e) {}
+
+    const play = () => v.play().catch(() => {});
+    let firstPlay = true;
+    v.onplaying = () => {
+      hideBadge();
+      if (firstPlay) {
+        firstPlay = false;
+        if (v.muted) showBadge('静音 · 点画面开声', false);
+      }
+    };
+
+    try {
+      if (res.kind === 'hls' && window.Hls && Hls.isSupported()) {
+        showBadge('接流…', true);
+        hls = new Hls({ lowLatencyMode: true, enableWorker: true, liveDurationInfinity: true });
+        hls.on(Hls.Events.ERROR, (_e, data) => {
+          if (data && data.fatal && !destroyed) showError('播放中断', data.details || data.type, true);
+        });
+        hls.loadSource(res.url);
+        hls.attachMedia(v);
+        play();
+      } else if (res.kind === 'hls' && v.canPlayType('application/vnd.apple.mpegurl')) {
+        showBadge('接流…', true);
+        v.src = res.url;
+        play();
+      } else if (res.kind === 'flv' && window.flvjs && flvjs.isSupported()) {
+        showBadge('接流…', true);
+        flv = flvjs.createPlayer({ type: 'flv', isLive: true, url: res.url }, {
+          enableStashBuffer: false, stashInitialSize: 128, lazyLoad: false
+        });
+        flv.on(flvjs.Events.ERROR, (type, detail) => {
+          if (!destroyed) showError('播放中断', String(detail || type), true);
+        });
+        flv.attachMediaElement(v);
+        flv.load();
+        flv.play();
+      } else {
+        await playShortPreview();
+      }
+    } catch (e) {
+      showError('播放失败', e.message, true);
+    }
+  }
+
+  setMuted(true);
+  start();
+
+  /* 调试：?auto=fs 起播后进全屏 / ?auto=resize 试缩放（自动化验证用） */
+  const auto = q.get('auto');
+  if (auto === 'fs') setTimeout(toggleFs, 2500);
+  if (auto === 'resize') setTimeout(() => { userSized = true; const a = apiObj(); if (a) a.resize(620, 880); }, 2500);
+})();
+</script>
+</body>
+</html>
