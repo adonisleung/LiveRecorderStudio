@@ -175,15 +175,19 @@ select.mini:hover{border-color:var(--outline)}
 .link-btn.danger:hover{color:var(--error);background:rgba(255,180,171,.1)}
 td:last-child .link-btn+.link-btn{margin-left:2px}
 
-/* MD3 switch */
-.switch{position:relative;width:52px;height:32px;flex:none;cursor:pointer}
+/* MD3 switch：全高胶囊轨道 + 缩放滑块（未选 16px 灰，选中 24px 白） */
+.switch{position:relative;width:52px;height:32px;flex:none;cursor:pointer;display:inline-block;
+  vertical-align:middle}
 .switch input{opacity:0;width:0;height:0}
-.switch i{position:absolute;inset:8px 0;border:2px solid var(--outline);background:var(--surface-c-highest);
+.switch i{position:absolute;inset:0;border:2px solid var(--outline);background:transparent;
   border-radius:var(--shape-full);transition:.2s}
-.switch i:before{content:"";position:absolute;width:16px;height:16px;left:4px;top:50%;
+.switch i:before{content:"";position:absolute;width:16px;height:16px;left:6px;top:50%;
   transform:translateY(-50%);background:var(--outline);border-radius:50%;transition:.2s}
 .switch input:checked + i{background:var(--primary);border-color:var(--primary)}
-.switch input:checked + i:before{transform:translate(20px,-50%);background:var(--on-primary);width:24px;height:24px;left:2px}
+.switch input:checked + i:before{transform:translate(20px,-50%);background:var(--on-primary);
+  width:24px;height:24px;left:2px}
+.switch:hover i{border-color:var(--on-surface-variant)}
+.switch input:checked:hover + i{border-color:var(--primary)}
 
 /* 空状态 */
 .empty{position:absolute;inset:44px 0 0;display:flex;flex-direction:column;align-items:center;
@@ -300,6 +304,7 @@ td:last-child .link-btn+.link-btn{margin-left:2px}
 .drawer-body{flex:1;overflow:auto;padding:18px 22px}
 .drawer-foot{display:flex;gap:10px;padding:14px 22px 20px;border-top:1px solid var(--outline-variant);flex-wrap:wrap}
 .drawer-foot .btn{flex:1;justify-content:center}
+.drawer-foot:empty{display:none}   /* 操作按钮已内联，底栏留空即隐藏 */
 
 .d-section{margin-bottom:18px}
 .d-section:last-child{margin-bottom:0}
@@ -312,15 +317,16 @@ td:last-child .link-btn+.link-btn{margin-left:2px}
 .d-row>span{color:var(--on-surface-variant);flex:none}
 .d-row>b{font-weight:500;font-family:var(--mono);font-size:12px;text-align:right;word-break:break-all}
 .d-row>b.wrap{font-family:inherit;font-size:12px;max-width:210px;text-align:right;line-height:1.5}
-.d-link{display:flex;align-items:center;gap:4px;min-width:0;max-width:230px}
-.d-link code{max-width:130px}
+.d-open{color:var(--primary);font-weight:500;font-size:12px;cursor:pointer;letter-spacing:.3px;
+  padding:5px 14px;border-radius:999px;background:var(--accent-dim);
+  border:1px solid transparent;transition:.15s;white-space:nowrap}
+.d-open:hover{border-color:var(--primary);filter:brightness(1.12)}
+.d-open:active{transform:scale(.97)}
 .d-row code{font:11.5px var(--mono);color:var(--on-surface-variant);overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap;max-width:200px;display:inline-block;vertical-align:middle}
-.d-url{display:flex;gap:8px;align-items:center;background:var(--surface-c-lowest);
-  border:1px solid var(--outline-variant);border-radius:var(--shape-sm);padding:8px 10px}
-.d-url code{flex:1;font:11.5px var(--mono);color:var(--on-surface-variant);overflow:hidden;
-  text-overflow:ellipsis;white-space:nowrap}
-.d-url code.masked{filter:blur(5px);user-select:none}
+/* 移除/保存按钮：紧跟监测开关，不再钉在抽屉底部 */
+.d-actions{display:flex;gap:10px;padding:12px 2px 6px}
+.d-actions .btn{flex:1;justify-content:center}
 .d-live .room-err{max-width:100%;white-space:normal;margin:6px 0 8px}
 .danger-zone{margin-top:16px;padding-top:14px;border-top:1px solid var(--outline-variant)}
 .detail-status{display:flex;align-items:center;gap:9px;margin-bottom:18px}
@@ -444,10 +450,3 @@ tbody tr:first-child .tip-wrap:hover::after{transform:translate(-50%,0)}
 .ctx-menu button{border:0;background:transparent;color:var(--on-surface);text-align:left;
   padding:8px 12px;border-radius:8px;font-size:12.5px;cursor:pointer;letter-spacing:.2px}
 .ctx-menu button:hover{background:var(--accent-dim);color:var(--primary)}
-
-/* 详情页直播链接：超链接样式，点击开系统浏览器 */
-.d-url{color:var(--primary);text-decoration:none;cursor:pointer;
-  max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;
-  vertical-align:bottom}
-.d-url:hover{text-decoration:underline}
-.d-url.masked{color:var(--on-surface-variant)}

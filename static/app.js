@@ -3,7 +3,7 @@ const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 let lastRoomSig = '', lastLogSig = '', filter = '';
-let drawerId = null, urlShown = false, lastState = null;
+let drawerId = null, lastState = null;
 const STATUS = {idle:'待检查', checking:'检测中', offline:'未开播', live:'直播中', recording:'录制中', error:'异常'};
 
 async function api(path, opts = {}) {
@@ -253,15 +253,13 @@ function findRoom(id) {
 }
 
 function openDrawer(id) {
-  drawerId = id; urlShown = false;
+  drawerId = id;
   const r = findRoom(id);
   if (!r) return;
   $('#drawerTitle').textContent = nameOf(r);
   $('#drawerSub').textContent = `${platformOf(r)}直播间${roomNo(r.url) ? ' · ' + roomNo(r.url) : ''}`;
   $('#drawerBody').innerHTML = drawerHtml(r);
-  $('#drawerFoot').innerHTML = `
-    <button class="btn ghost danger-text" id="dRemove">移除此直播间</button>
-    <button class="btn primary" id="dSave">保存修改</button>`;
+  $('#drawerFoot').innerHTML = '';   // 操作按钮已内联到监测开关下方
   $('#drawer').classList.remove('hidden');
   bindDrawer(r);
   updateDrawerLive();
@@ -289,9 +287,7 @@ function drawerHtml(r) {
       <div class="d-row"><span>房间号</span><b>${esc(roomNo(r.url) || '—')}</b></div>
       <div class="d-row"><span>直播标题</span><b class="wrap" id="dTitle">${esc(r.title || '—')}</b></div>
       <div class="d-row"><span>直播链接</span>
-        <span class="d-link"><a id="dUrl" class="d-url masked" href="${esc(r.url)}" title="点击用浏览器打开">${esc(r.url)}</a>
-          <button class="link-btn" id="dToggleUrl">显示</button>
-          <button class="link-btn" id="dCopy">复制</button></span></div>
+        <a id="dOpenLive" class="d-open" title="点击用浏览器打开直播链接">打开直播间</a></div>
       <div class="d-row"><span>录制格式</span><b>${esc(String(cfg.format || 'ts').toUpperCase())}</b></div>
       <div class="d-row"><span>录制画质</span><b>${esc(r.quality || '原画')}</b></div>
       <div class="d-row"><span>使用代理</span><b>${cfg.proxy ? esc(cfg.proxy) : '否'}</b></div>
@@ -302,6 +298,10 @@ function drawerHtml(r) {
       <div class="d-row"><span>监控状态</span><b id="dStatus" class="tag ${r.status}">${STATUS[r.status] || r.status}</b></div>
       <div class="d-row"><span>监测开关</span>
         <label class="switch" title="停用后不再检测该房间"><input type="checkbox" id="dEnabled" ${r.enabled ? 'checked' : ''}><i></i></label></div>
+      <div class="d-actions">
+        <button class="btn ghost danger-text" id="dRemove">移除此直播间</button>
+        <button class="btn primary" id="dSave">保存修改</button>
+      </div>
       <div id="dError" class="room-err">${r.error ? esc(r.error) : ''}</div>
     </div>
   </div>`;
@@ -468,19 +468,10 @@ async function startVideoPip(rid, res) {
 }
 
 function bindDrawer(r) {
-  $('#dUrl').onclick = async (e) => {
+  $('#dOpenLive').onclick = async (e) => {
     e.preventDefault();
-    try { await post('/api/open-url', {url: r.url}); toast('已在浏览器中打开'); }
+    try { await post('/api/open-url', {url: r.url}); toast('已在浏览器中打开直播间'); }
     catch (err) { toast(err.message || '打开失败'); }
-  };
-  $('#dToggleUrl').onclick = () => {
-    urlShown = !urlShown;
-    $('#dUrl').classList.toggle('masked', !urlShown);
-    $('#dToggleUrl').textContent = urlShown ? '隐藏' : '显示';
-  };
-  $('#dCopy').onclick = async () => {
-    try { await navigator.clipboard.writeText(r.url); toast('地址已复制'); }
-    catch { toast('复制失败，请手动选中'); }
   };
   $('#dEnabled').onchange = async (e) => {
     await api('/api/rooms/' + r.id, {method:'PATCH', body: JSON.stringify({enabled: e.target.checked})});
