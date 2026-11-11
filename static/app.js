@@ -2,7 +2,11 @@ const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-let lastRoomSig = '', lastLogSig = '', filter = '';
+let lastRoomSig = '', lastLogSig = '';
+let hoverPause = false;        // 鼠标悬停表格时暂停重建，避免行从鼠标下跳走
+let pendingRebuild = false;    // 悬停/节流期间攒下的重建任务
+let lastRebuild = 0;           // 上次整表重建时刻（重建节流）
+let lastLogRebuild = 0;        // 上次日志重建时刻（日志节流）
 let drawerId = null, lastState = null;
 const STATUS = {idle:'待检查', checking:'检测中', offline:'未开播', live:'直播中', recording:'录制中', error:'异常'};
 
@@ -39,7 +43,9 @@ function durText(s) {
   const p = (n) => String(n).padStart(2, '0');
   return h ? `${h}:${p(m)}:${p(sec)}` : `${m}:${p(sec)}`;
 }
-const nameOf = (r) => r.display_name || r.alias || r.anchor || r.note || '未命名直播间';
+const nameOf = (r) => r.display_name || r.alias || r.anchor || '未命名直播间';
+/* 在线人数：0 = 这次没探到（未开播 / 接口降级），详情页显示占位符 */
+const viewersText = (v) => Number(v) > 0 ? Number(v).toLocaleString('zh-CN') : '—';
 const platformOf = (r) => r.platform || (() => {
   const u = typeof r === 'string' ? r : (r.url || '');
   if (u.startsWith('demo://')) return '演示';
@@ -66,12 +72,25 @@ const ICON = {
   自定义: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.4 3.8 5.6 3.8 9S14.5 18.6 12 21c-2.5-2.4-3.8-5.6-3.8-9S9.5 5.4 12 3z"/></svg>',
   folder: '<svg viewBox="0 0 24 24"><path d="M3 7.5h5.5l1.8 2H21v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-10z"/></svg>',
   info: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><circle cx="12" cy="7.8" r=".9" fill="currentColor" stroke="none"/></svg>',
+  sun: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.2 5.2l1.6 1.6M17.2 17.2l1.6 1.6M18.8 5.2l-1.6 1.6M6.8 17.2l-1.6 1.6"/></svg>',
+  moon: '<svg viewBox="0 0 24 24"><path d="M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.6 8.6 0 1 0 11.1 11.1z"/></svg>',
   rec: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/></svg>',
   stop: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><rect x="8.6" y="8.6" width="6.8" height="6.8" rx="1.4" fill="currentColor" stroke="none"/></svg>',
   trash: '<svg viewBox="0 0 24 24"><path d="M4 7h16M9.5 7V5.2A1.2 1.2 0 0 1 10.7 4h2.6a1.2 1.2 0 0 1 1.2 1.2V7"/><path d="M6.5 7l.8 11.4A2 2 0 0 0 9.3 20h5.4a2 2 0 0 0 2-1.6L17.5 7"/><path d="M10.5 11v5M13.5 11v5"/></svg>',
 };
 
 /* ---------- 列表 ---------- */
+/* 双列卡片里名字放不下时左右往返滚动；单列仍用省略号。
+   整表重建 / 布局切换 / 窗口变化后都要重新量一次实际宽度。 */
+function markOverflowNames() {
+  if (!$('.table-wrap').classList.contains('two-col')) return;
+  for (const el of $('#roomRows').querySelectorAll('.nm-click')) {
+    const shift = el.scrollWidth - el.clientWidth;
+    el.classList.toggle('nm-overflow', shift > 4);
+    el.style.setProperty('--nm-shift', Math.max(0, shift) + 'px');
+  }
+}
+
 function roomRow(r) {
   const st = r.status || 'idle';
   const canStop = st === 'recording';
@@ -83,14 +102,10 @@ function roomRow(r) {
   return `<tr data-id="${r.id}" class="${st}">
     <td><span class="tag ${waiting ? 'wait' : st}" title="${waiting ? `${plat}限流静默中，约 ${Math.ceil(blocked / 60)} 分钟后重试` : ''}">${waiting ? '限流等待' : (STATUS[st] || st)}</span></td>
     <td><span class="tip-wrap plat-ico ${st}" data-tip="${esc(plat)}${st === 'recording' ? ' · 正在录制' : st === 'live' ? ' · 直播中' : ''}">${ICON[plat] || ICON['自定义']}</span></td>
-    <td><div class="room-name"><span class="nm">${esc(nameOf(r))}</span></div>${sub}</td>
-    <td class="q-col"><select class="mini" data-k="quality">
-      ${['原画','超清','高清','标清','流畅'].map(q => `<option ${r.quality===q?'selected':''}>${q}</option>`).join('')}
-    </select></td>
+    <td><div class="room-name"><span class="nm nm-click" data-act="detail" title="点击查看直播间详情"><span class="nm-txt">${esc(nameOf(r))}</span></span></div>${sub}</td>
     <td class="q-col"><span class="mono dur" data-dur="${r.id}">${durText(r.rec_seconds)}</span></td>
     <td><div class="row-actions">
       <button class="icon-act tip-wrap" data-act="folder" data-tip="打开文件夹">${ICON.folder}</button>
-      <button class="icon-act tip-wrap" data-act="detail" data-tip="详情">${ICON.info}</button>
       ${canStop
         ? `<button class="icon-act stop tip-wrap" data-act="stop" data-tip="停止录制">${ICON.stop}</button>`
         : `<button class="icon-act rec tip-wrap" data-act="start" data-tip="立即录制">${ICON.rec}</button>`}
@@ -101,25 +116,35 @@ function roomRow(r) {
 function render(s) {
   lastState = s;
   const cfg = s.config || {};
-  const rooms = (s.rooms || []).filter(r =>
-    !filter || (r.url + ' ' + nameOf(r) + ' ' + r.note).toLowerCase().includes(filter));
+  const rooms = s.rooms || [];
   // 只有「会改变行结构」的字段进入签名；时长/大小每轮都在跳，
   // 若一起进签名，表格会每 1.5 秒重建一次，画质下拉框会被反复打断。
+  // 「checking」是扫描瞬态（几百个房间轮流翻转），也排除掉，避免无意义重建。
   const sig = JSON.stringify(rooms.map(r =>
-    [r.id, r.status, r.enabled, r.quality, r.display_name, r.note, r.error, r.anchor])) + '|' + s.running;
-  if (sig !== lastRoomSig) {
+    [r.id, r.status === 'checking' ? '' : r.status, r.enabled, r.quality,
+     r.display_name, r.note, r.error, r.anchor])) + '|' + s.running;
+  if (sig !== lastRoomSig) pendingRebuild = true;
+  // 悬停在表格上时不重建（否则行会从鼠标底下跳走，点不中）；
+  // 非悬停时也最多 1.2 秒重建一次，压掉扫描期的高频重建。
+  if (pendingRebuild && !hoverPause && Date.now() - lastRebuild >= 1200) {
     lastRoomSig = sig;
+    pendingRebuild = false;
+    lastRebuild = Date.now();
     $('#roomRows').innerHTML = rooms.map(roomRow).join('');
+    markOverflowNames();
     $('#empty').classList.toggle('hidden', (s.rooms || []).length > 0);
     const onAir = (s.rooms || []).filter(r => r.status === 'recording' || r.status === 'live').length;
     $('#roomsHint').textContent =
       `${s.stats.total} 个房间 · ${s.stats.enabled} 个启用${onAir ? ` · ${onAir} 个在播` : ''} · 在播优先排序`;
   }
-  // 时长走定点刷新，不触发重建
-  rooms.forEach(r => {
-    const el = document.querySelector(`[data-dur="${r.id}"]`);
-    if (el) el.textContent = durText(r.rec_seconds);
-  });
+  // 时长走定点刷新（一次 querySelectorAll 建索引，不做逐行 querySelector——
+  // 1381 行 × 每 1.5 秒一次选择器查询是长时间运行卡顿的主因）
+  const durMap = {};
+  for (const r of rooms) durMap[r.id] = r;
+  for (const el of $('#roomRows').querySelectorAll('[data-dur]')) {
+    const r = durMap[el.getAttribute('data-dur')];
+    if (r) el.textContent = durText(r.rec_seconds);
+  }
   $('#sTotal').textContent = s.stats.total;
   $('#sLive').textContent = s.stats.live;
   $('#sRec').textContent = s.stats.recording;
@@ -147,8 +172,10 @@ function render(s) {
 
   const logs = s.logs || [];
   const lsig = logs.length + ':' + (logs.length ? logs[logs.length-1].t + logs[logs.length-1].text : '');
-  if (lsig !== lastLogSig) {
+  // 日志也节流到最多 2 秒一次重建；节流跳过时不更新 lastLogSig，下一轮会自动补上
+  if (lsig !== lastLogSig && Date.now() - lastLogRebuild >= 2000) {
     lastLogSig = lsig;
+    lastLogRebuild = Date.now();
     const box = $('#logs');
     const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
     box.innerHTML = logs.map(l => `<div class="log-row"><span class="log-t">${esc(l.t)}</span><span class="log-lv ${esc(l.level)}">${esc(l.level)}</span><span class="log-x">${esc(l.text)}</span></div>`).join('');
@@ -268,12 +295,14 @@ function openDrawer(id) {
 function drawerHtml(r) {
   const cfg = lastState?.config || {};
   const file = r.file ? r.file.split(/[\\/]/).pop() : '';
+  // 输入框同步显示当前生效的名字；data-origin 用来区分「用户真的改过」和「只是回填」
+  const aliasShown = r.alias || r.anchor || '';
   return `
   <div class="d-section">
     <label class="d-label">显示名称</label>
-    <input class="input" id="dAlias" maxlength="40" value="${esc(r.alias || r.anchor || '')}"
-           placeholder="留空则使用解析到的昵称">
-    <p class="hint">只改显示名，不影响录制目录以外的任何逻辑。</p>
+    <input class="input" id="dAlias" maxlength="40" value="${esc(aliasShown)}"
+           data-origin="${esc(aliasShown)}" placeholder="留空则使用解析到的昵称">
+    <p class="hint">这里同步显示当前名字。改动并保存后以你填的为准（列表、录制目录和文件名都优先用它）；不改动则继续跟随抖音昵称，主播改名会自动更新。</p>
   </div>
   <div class="d-section">
     <label class="d-label">备注</label>
@@ -282,14 +311,16 @@ function drawerHtml(r) {
   <div class="d-section">
     <label class="d-label">录制信息</label>
     <div class="d-live">
-      <div class="d-row"><span>主播名称</span><b>${esc(nameOf(r))}</b></div>
-      <div class="d-row"><span>平台名称</span><b>${esc(platformOf(r))}直播</b></div>
-      <div class="d-row"><span>房间号</span><b>${esc(roomNo(r.url) || '—')}</b></div>
+      <div class="d-row"><span>主播名称</span><b>${esc(r.anchor || '—')}</b></div>
+      <div class="d-row"><span>在线人数</span><b id="dViewers">${viewersText(r.viewers)}</b></div>
       <div class="d-row"><span>直播标题</span><b class="wrap" id="dTitle">${esc(r.title || '—')}</b></div>
       <div class="d-row"><span>直播链接</span>
         <a id="dOpenLive" class="d-open" title="点击用浏览器打开直播链接">打开直播间</a></div>
       <div class="d-row"><span>录制格式</span><b>${esc(String(cfg.format || 'ts').toUpperCase())}</b></div>
-      <div class="d-row"><span>录制画质</span><b>${esc(r.quality || '原画')}</b></div>
+      <div class="d-row"><span>录制画质</span>
+        <select class="mini d-quality" id="dQuality" title="切换该房间的录制画质">
+          ${['原画','超清','高清','标清','流畅'].map(q => `<option ${(r.quality||'原画')===q?'selected':''}>${q}</option>`).join('')}
+        </select></div>
       <div class="d-row"><span>使用代理</span><b>${cfg.proxy ? esc(cfg.proxy) : '否'}</b></div>
       <div class="d-row"><span>本次录制时长</span><b id="dDur">${durText(r.rec_seconds)}</b></div>
       <div class="d-row"><span>已录大小</span><b id="dSize">${sizeText(r.rec_bytes) || '—'}</b></div>
@@ -478,9 +509,18 @@ function bindDrawer(r) {
     toast(e.target.checked ? '已启用该房间' : '已停用，不再检测');
     lastRoomSig = ''; refresh();
   };
+  $('#dQuality').onchange = async (e) => {
+    await api('/api/rooms/' + r.id, {method:'PATCH', body:JSON.stringify({quality: e.target.value})});
+    toast('画质已设为 ' + e.target.value); lastRoomSig = ''; refresh();
+  };
   $('#dSave').onclick = async () => {
+    const val = $('#dAlias').value.trim();
+    const origin = $('#dAlias').dataset.origin || '';
+    // 回填的名字只是「显示」，没被改动就不写死 alias：
+    // 这样抖音以后改昵称，列表和录制目录还能自动跟着变。
+    const alias = val === origin ? (r.alias || '') : val;
     await api('/api/rooms/' + r.id, {method:'PATCH', body: JSON.stringify({
-      alias: $('#dAlias').value.trim(), note: $('#dNote').value.trim()})});
+      alias, note: $('#dNote').value.trim()})});
     toast('已保存'); lastRoomSig = ''; await refresh();
     const fresh = findRoom(r.id);
     if (fresh) { $('#drawerTitle').textContent = nameOf(fresh); }
@@ -498,6 +538,7 @@ function updateDrawerLive() {
   set('#dSize', sizeText(r.rec_bytes) || '—');
   set('#dDur', durText(r.rec_seconds));
   set('#dTitle', r.title || '—');
+  set('#dViewers', viewersText(r.viewers));
   const err = $('#dError');
   if (err) err.textContent = r.error || '';
   const nameEl = $('#drawerTitle');
@@ -505,7 +546,11 @@ function updateDrawerLive() {
 }
 
 function closeDrawer() { drawerId = null; $('#drawer').classList.add('hidden'); }
-$('#drawer').addEventListener('click', (e) => { if (e.target.dataset.close) closeDrawer(); });
+/* 点抽屉面板外的任意空白即关闭。面板内部一律不关闭，
+   右上角那个小 × 太容易误触，已去掉。ESC 仍可关闭。 */
+$('#drawer').addEventListener('click', (e) => {
+  if (!e.target.closest('.drawer-panel')) closeDrawer();
+});
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (!$('#drawer').classList.contains('hidden')) closeDrawer();
@@ -521,7 +566,20 @@ $('#btnEngine').onclick = async () => {
 };
 $('#btnFolder').onclick = async () => { try { await post('/api/open-folder'); } catch (e) { toast(e.message); } };
 $('#btnClearLog').onclick = () => { lastLogSig = 'reset'; $('#logs').innerHTML = ''; };
-$('#search').oninput = (e) => { filter = e.target.value.trim().toLowerCase(); lastRoomSig = ''; refresh(); };
+/* 单列 / 双列布局切换：状态存本地，下次打开保持。
+   纯 CSS 重排表格行，切完不需要重建表格，也不会打断画质下拉框。 */
+let twoCol = localStorage.getItem('lrs.twocol') === '1';
+function applyLayout() {
+  $('.table-wrap').classList.toggle('two-col', twoCol);
+  $('#btnLayoutText').textContent = twoCol ? '单列' : '双列';
+  $('#btnLayout').dataset.tip = twoCol ? '切换为单列布局' : '切换为双列布局';
+  $('#btnLayout').classList.toggle('active', twoCol);
+  localStorage.setItem('lrs.twocol', twoCol ? '1' : '0');
+  markOverflowNames();
+}
+$('#btnLayout').onclick = () => { twoCol = !twoCol; applyLayout(); };
+window.addEventListener('resize', markOverflowNames);
+applyLayout();
 
 /* 右侧状态/日志栏折叠：状态存本地，下次打开保持 */
 // v2 键：默认隐藏侧栏（旧键作废，一次性重置成用户要的默认值）；点开后会记住
@@ -534,6 +592,21 @@ function applySide() {
 }
 $('#btnSide').onclick = () => { sideHidden = !sideHidden; applySide(); };
 applySide();
+
+/* 主题：浅色 / 深色，存本地记忆。默认深色，保持原有观感，不擅自换掉用户的默认外观 */
+let themeMode = localStorage.getItem('lrs.theme') === 'light' ? 'light' : 'dark';
+function applyTheme() {
+  document.documentElement.dataset.theme = themeMode;
+  const light = themeMode === 'light';
+  $('#btnTheme').innerHTML = light ? ICON.moon : ICON.sun;
+  $('#btnTheme').dataset.tip = light ? '切换为深色' : '切换为浅色';
+}
+$('#btnTheme').onclick = () => {
+  themeMode = themeMode === 'light' ? 'dark' : 'light';
+  localStorage.setItem('lrs.theme', themeMode);
+  applyTheme();
+};
+applyTheme();
 
 /* 快捷键录入：聚焦后直接按组合键，keydown 里拼成 'Ctrl+Alt+H'。
    两个坑（用户实测「只能单键、Alt+组合录不上」）：
@@ -682,17 +755,21 @@ $('#modal').addEventListener('click', (e) => {
 
 $('#btnImport').onclick = () => {
   openModal('导入', `
-  <textarea id="importText" placeholder="支持批量导入&#10;一行一个地址，例如：&#10;https://live.douyin.com/745964462470&#10;https://live.kuaishou.com/u/sunni777&#10;超清,https://live.kuaishou.com/u/xxx,主播备注&#10;demo://离线演示"></textarea>
+  <textarea id="importText" placeholder="支持批量导入&#10;一行一个直播间地址，例如：&#10;https://live.douyin.com/745964462470&#10;https://live.kuaishou.com/u/sunni777&#10;demo://离线演示"></textarea>
   <div class="import-bar">
     <button class="btn small tonal" id="btnPasteIn">粘贴</button>
     <button class="btn small ghost" id="btnExport">导出列表</button>
   </div>
-  <p class="hint">支持平台：<b>抖音</b>（live.douyin.com）、<b>快手</b>（live.kuaishou.com/u/…）、<b>小红书</b>（xiaohongshu.com/livestream/…）、<code>.m3u8</code> / <code>.flv</code> 直链、<code>demo://名称</code> 离线演示。<br>行首加 # 可注释；重复地址自动跳过。新导入的房间会立即检测。导出格式与导入一致，可直接再导入。</p>`,
+  <p class="hint">支持平台：<b>抖音</b>（live.douyin.com）、<b>快手</b>（live.kuaishou.com/u/…）、<b>小红书</b>（xiaohongshu.com/livestream/…）、<code>.m3u8</code> / <code>.flv</code> 直链、<code>demo://名称</code> 离线演示。<br><b>只识别每行里的地址</b>：同一行带的主播名、备注、画质都会被忽略 —— 主播名一律靠平台解析，备注和显示名称在详情里自己填。行首加 # 可注释；重复地址自动跳过；新导入的房间会立即检测。</p>`,
   '导入', async () => {
     const text = $('#importText').value;
     if (!text.trim()) return closeModal();
     const r = await post('/api/rooms', {text});
-    closeModal(); toast(`新增 ${r.added} 个，跳过重复 ${r.skipped} 个`);
+    closeModal();
+    const bits = [`新增 ${r.added} 个`];
+    if (r.skipped) bits.push(`重复 ${r.skipped} 个`);
+    if (r.ignored) bits.push(`无地址 ${r.ignored} 行`);
+    toast(bits.join(' · '));
     lastRoomSig = ''; refresh();
   });
   bindImportExport();
@@ -708,6 +785,18 @@ function bindImportExport() {
    这里自绘菜单（粘贴/复制/剪切/全选），并提供可点击的「粘贴」按钮兜底。 */
 async function pasteInto(el) {
   if (!el) return;
+  /* 优先让本地进程读系统剪贴板：WebView2 里的 navigator.clipboard.readText()
+     要过浏览器权限，容易弹「允许访问剪贴板？」的原生提示，体验很差。
+     本地进程读不弹窗，也不受权限模型影响；接口不可用时再回退浏览器 API。 */
+  try {
+    const r = await api('/api/clipboard');
+    if (r && typeof r.text === 'string') {
+      if (!r.text.trim()) { el.focus(); toast('剪贴板里没有文字'); return; }
+      insertAtCursor(el, r.text);
+      toast('已粘贴');
+      return;
+    }
+  } catch (e) { /* 回退 */ }
   try {
     const t = await navigator.clipboard.readText();
     insertAtCursor(el, t || '');
@@ -814,7 +903,7 @@ $('#btnSettings').onclick = async () => {
         ${['原画','超清','高清','标清','流畅'].map(q =>
           `<option ${(c.quality || '原画')===q?'selected':''}>${q}</option>`).join('')}
       </select>
-      <p class="hint">列表里每行的画质下拉仍可单独覆盖；抖音「原画」即最高档，遇到仅 App 端可播的房间会自动降级。</p>
+      <p class="hint">每个房间的画质可在详情里单独覆盖；抖音「原画」即最高档，遇到仅 App 端可播的房间会自动降级。</p>
     </div>
     <div class="field">
       <label>保存位置</label>
@@ -893,7 +982,18 @@ $('#btnSettings').onclick = async () => {
     refresh();
   });
 
-  $('#cBrowse').onclick = () => {
+  $('#cBrowse').onclick = async () => {
+    // 优先系统原生文件夹选择器（和 StreamCap 的 FilePicker.get_directory_path 一个思路），
+    // 自带盘符、网络路径、新建文件夹；拿不到再退回内置目录树，保证任何环境都能选。
+    try {
+      const r = await api('/api/pick-dir');
+      if (r && r.ok && r.path) {
+        $('#cSaveDir').value = r.path;
+        $('#cSaveHint').innerHTML = `当前位置：<code>${esc(r.path)}</code><br>点「保存」后对新录制生效。`;
+        return;
+      }
+      if (r && r.cancel) return;          // 用户点了取消，静默返回
+    } catch (e) { /* 系统对话框不可用 → 回退 */ }
     folderPicker(s.save_path || '', (picked) => {
       $('#cSaveDir').value = picked;
       $('#cSaveHint').innerHTML = `当前位置：<code>${esc(picked)}</code><br>点「保存」后对新录制生效。`;
@@ -915,6 +1015,20 @@ $('#btnSettings').onclick = async () => {
   });
 };
 
+/* 悬停暂停：鼠标在表格上时暂停整表重建（否则行会从鼠标底下跳走，点不中），
+   移开后立即补一次重建 */
+const _tableWrap = document.querySelector('.table-wrap');
+if (_tableWrap) {
+  _tableWrap.addEventListener('mouseenter', () => { hoverPause = true; });
+  _tableWrap.addEventListener('mouseleave', () => {
+    hoverPause = false;
+    if (pendingRebuild && lastState) {
+      lastRebuild = 0;
+      render(lastState);
+    }
+  });
+}
+
 setInterval(refresh, 1500);
 refresh();
 
@@ -930,3 +1044,34 @@ if (_openId) {
 /* 深链：#import / #settings 直接打开对应弹窗（快捷方式与自动化用得上） */
 if (location.hash === '#import') $('#btnImport').click();
 else if (location.hash === '#settings') $('#btnSettings').click();
+
+/* 滚动条显形：鼠标靠近滚动容器的右/下边缘（24px 内）才淡入；滚动时短暂显示后自动隐去 */
+(function () {
+  const SEL = '.table-wrap, .drawer-body, .logs';
+  const EDGE = 24;
+  const flash = (el) => {
+    el.classList.add('sb-on');
+    clearTimeout(el._sbHide);
+    el._sbHide = setTimeout(() => el.classList.remove('sb-on'), 900);
+  };
+  document.addEventListener('mousemove', (e) => {
+    document.querySelectorAll(SEL).forEach((el) => {
+      const r = el.getBoundingClientRect();
+      if (!r.width) return;
+      const near = (e.clientX >= r.right - EDGE && e.clientX <= r.right + 4) ||
+                   (e.clientY >= r.bottom - EDGE && e.clientY <= r.bottom + 4);
+      if (near) {
+        el.classList.add('sb-on');
+        clearTimeout(el._sbHide);
+        el._sbHide = null;
+      } else if (!el._sbHide) {
+        el._sbHide = setTimeout(() => el.classList.remove('sb-on'), 300);
+      }
+    });
+  }, { passive: true });
+  // 滚动事件不冒泡，用捕获阶段兜住所有滚动容器
+  document.addEventListener('scroll', (e) => {
+    const el = e.target && e.target.closest ? e.target.closest(SEL) : null;
+    if (el) flash(el);
+  }, true);
+})();

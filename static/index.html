@@ -19,6 +19,9 @@
         <svg viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v9a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7z"/></svg>目录</button>
       <button id="btnSettings" class="btn ghost" title="设置">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M4.9 4.9l2.1 2.1m10 10 2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></svg>设置</button>
+      <button id="btnTheme" class="btn ghost icon-only tip-wrap tip-below" data-tip="切换浅色 / 深色" title="切换主题">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.2 5.2l1.6 1.6M17.2 17.2l1.6 1.6M18.8 5.2l-1.6 1.6M6.8 17.2l-1.6 1.6"/></svg>
+      </button>
       <button id="btnSide" class="btn ghost icon-only tip-wrap tip-below" data-tip="收起侧栏">
         <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M15 4v16"/><path d="M11.5 12h-5"/><path d="M8.5 9.5 6 12l2.5 2.5"/></svg></button>
       <button id="btnEngine" class="btn primary"><span class="dot"></span><span id="btnEngineText">启动监测</span></button>
@@ -30,7 +33,10 @@
       <div class="panel-head">
         <div><h2>直播间</h2><p id="roomsHint">导入链接后启动监测</p></div>
         <div class="panel-actions">
-          <input id="search" class="input search" placeholder="搜索主播、备注或链接" autocomplete="off">
+          <button id="btnLayout" class="btn small ghost layout-btn tip-wrap tip-below" data-tip="切换为双列布局" title="切换布局">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="7.5" height="16" rx="1.5"/><rect x="13.5" y="4" width="7.5" height="16" rx="1.5"/></svg>
+            <span id="btnLayoutText">双列</span>
+          </button>
           <button id="btnImport" class="btn small icon-only add-btn tip-wrap tip-below" data-tip="导入直播间" title="导入直播间">
             <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
           </button>
@@ -38,8 +44,8 @@
       </div>      <div class="table-wrap">
         <table>
           <thead><tr>
-            <th style="width:10%">状态</th><th style="width:7%">平台</th><th style="width:33%">主播名</th>
-            <th class="q-col" style="width:11%">画质</th><th class="q-col" style="width:13%">已录制时长</th><th style="width:26%">操作</th>
+            <th style="width:11%">状态</th><th style="width:8%">平台</th><th style="width:42%">主播名</th>
+            <th class="q-col" style="width:14%">已录制时长</th><th style="width:25%">操作</th>
           </tr></thead>
           <tbody id="roomRows"></tbody>
         </table>
@@ -86,7 +92,6 @@
   <aside class="drawer-panel">
     <header class="drawer-head">
       <div><h3 id="drawerTitle">主播详情</h3><p id="drawerSub"></p></div>
-      <button class="icon-btn" data-close="1" title="关闭">×</button>
     </header>
     <div id="drawerBody" class="drawer-body"></div>
     <footer id="drawerFoot" class="drawer-foot"></footer>

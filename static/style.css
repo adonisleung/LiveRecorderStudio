@@ -3,36 +3,118 @@
    色板 / 字号 / 圆角 / 阴影 / 状态层均按 MD3 规范取值
    ============================================================ */
 :root{
-  /* MD3 color roles — dark scheme */
-  --primary:#4de0cb;          --on-primary:#003731;
-  --primary-container:#005048;--on-primary-container:#72f5e1;
-  --secondary:#b6ccc7;        --secondary-container:#2d3c39; --on-secondary-container:#d2ebe5;
-  --error:#ffb4ab;            --on-error:#690005;
-  --error-container:#93000a;  --on-error-container:#ffdad6;
+  /* ================= MD3 color roles · dark（默认方案） ================= */
+  --primary:#4de0cb;            --on-primary:#003731;
+  --primary-container:#005048;  --on-primary-container:#72f5e1;
+  --secondary:#b6ccc7;          --on-secondary:#213532;
+  --secondary-container:#2d3c39;--on-secondary-container:#d2ebe5;
+  --tertiary:#a8c7fa;           --on-tertiary:#062e6f;
+  --tertiary-container:#1b3a63; --on-tertiary-container:#d3e3ff;
+  --error:#ffb4ab;              --on-error:#690005;
+  --error-container:#93000a;    --on-error-container:#ffdad6;
+  --success:#7ee2b8;            --on-success:#00382a;
+  --warning:#fcd34d;            --on-warning:#3b2f00;
+  --warning-container:rgba(252,211,77,.14);
+  /* 状态 chip 的轻量 tonal（比 error-container 更克制，录制中不必像报错） */
+  --tag-live-bg:rgba(77,224,203,.14);  --tag-live-fg:#8af3e2;
+  --tag-rec-bg:rgba(255,180,171,.16);  --tag-rec-fg:#ffc9c3;
+  --tag-info-bg:rgba(168,199,250,.16); --tag-info-fg:#c3d9ff;
+
   --surface:#0c1013;
-  --surface-c-lowest:#080b0e; --surface-c-low:#101418;
-  --surface-c:#151a1f;        --surface-c-high:#1b2127; --surface-c-highest:#252c33;
-  --on-surface:#e3e9ee;       --on-surface-variant:#bcc5ce;
-  --outline:#8a94a1;          --outline-variant:#39424b;
-  --inverse-surface:#e3e9ee;  --inverse-on-surface:#20262c;
+  --surface-dim:#080b0e;
+  --surface-bright:#323a41;
+  --surface-c-lowest:#080b0e;   --surface-c-low:#101418;
+  --surface-c:#151a1f;          --surface-c-high:#1b2127;
+  --surface-c-highest:#252c33;
+  --on-surface:#e3e9ee;         --on-surface-variant:#bcc5ce;
+  --outline:#8a94a1;            --outline-variant:#39424b;
+  --inverse-surface:#e3e9ee;    --inverse-on-surface:#20262c;
   --scrim:rgba(0,0,0,.42);
+  --shadow-color:rgba(0,0,0,.30);
 
-  /* MD3 shape */
-  --shape-xs:4px; --shape-sm:8px; --shape-md:12px; --shape-lg:16px; --shape-xl:28px; --shape-full:999px;
+  /* ================= state layers（MD3: hover 8% / press 12%） ================= */
+  --state-hover:rgba(227,233,238,.08);
+  --state-press:rgba(227,233,238,.12);
+  --state-focus:rgba(227,233,238,.10);
+  --disabled-fg:rgba(227,233,238,.38);
+  --scrollbar:#39424b; --scrollbar-hover:#55606b; --scrollbar-active:#6b7784;
 
-  /* MD3 elevation */
-  --e1:0 1px 2px rgba(0,0,0,.30),0 1px 3px 1px rgba(0,0,0,.15);
-  --e2:0 1px 2px rgba(0,0,0,.30),0 2px 6px 2px rgba(0,0,0,.15);
-  --e3:0 1px 3px rgba(0,0,0,.30),0 4px 8px 3px rgba(0,0,0,.15);
+  /* ================= typography scale ================= */
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;
+  --fs-display:22px; --fs-title-lg:17px; --fs-title:15px; --fs-title-sm:14px;
+  --fs-body:13px; --fs-body-sm:12.5px; --fs-label:11.5px; --fs-label-sm:11px;
+  --lh-tight:1.3; --lh-body:1.55;
+  --fw-regular:400; --fw-medium:500; --fw-semibold:600;
 
-  /* 兼容旧变量名（结构样式仍引用） */
+  /* ================= spacing scale（4pt 网格） ================= */
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px;
+  --sp-5:20px; --sp-6:24px; --sp-8:32px;
+
+  /* ================= MD3 shape ================= */
+  --shape-xs:4px; --shape-sm:8px; --shape-md:12px;
+  --shape-lg:16px; --shape-xl:28px; --shape-full:999px;
+
+  /* ================= MD3 elevation ================= */
+  --e0:none;
+  --e1:0 1px 2px var(--shadow-color),0 1px 3px 1px rgba(0,0,0,.15);
+  --e2:0 1px 2px var(--shadow-color),0 2px 6px 2px rgba(0,0,0,.15);
+  --e3:0 1px 3px var(--shadow-color),0 4px 8px 3px rgba(0,0,0,.15);
+
+  /* ================= motion（MD3 easing） ================= */
+  --dur-short:120ms; --dur-med:200ms; --dur-long:320ms;
+  --ease-standard:cubic-bezier(.2,0,0,1);
+  --ease-emphasized:cubic-bezier(.2,0,0,1);
+  --ease-decel:cubic-bezier(.05,.7,.1,1);
+
+  /* ================= 兼容旧变量名（结构样式仍引用） ================= */
   --bg:var(--surface-c-lowest); --panel:var(--surface-c-low); --panel2:var(--surface-c);
   --line:var(--outline-variant); --line2:#454f59;
   --text:var(--on-surface); --muted:var(--on-surface-variant); --dim:#7d8794;
   --accent:var(--primary); --accent-dim:rgba(77,224,203,.12);
-  --red:var(--error); --amber:#fcd34d; --blue:#a8c7fa;
+  --red:var(--error); --amber:var(--warning); --blue:var(--tertiary);
   --radius:var(--shape-lg);
-  --mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;
+}
+
+/* ================= MD3 color roles · light =================
+   只替换色彩角色与状态层，形状/间距/动效 token 全部复用，
+   这样两套主题的行为完全一致，不会出现"亮色下尺寸变了"。 */
+html[data-theme="light"]{
+  --primary:#00695a;            --on-primary:#ffffff;
+  --primary-container:#9ef4e3;  --on-primary-container:#00201b;
+  --secondary:#4a635e;          --on-secondary:#ffffff;
+  --secondary-container:#cde9e3;--on-secondary-container:#06201c;
+  --tertiary:#2f5b96;           --on-tertiary:#ffffff;
+  --tertiary-container:#d5e3ff; --on-tertiary-container:#001b3a;
+  --error:#ba1a1a;              --on-error:#ffffff;
+  --error-container:#ffdad6;    --on-error-container:#410002;
+  --success:#006b52;            --on-success:#ffffff;
+  --warning:#7a5900;            --on-warning:#ffffff;
+  --warning-container:rgba(122,89,0,.12);
+  --tag-live-bg:rgba(0,105,90,.10);   --tag-live-fg:#00564a;
+  --tag-rec-bg:rgba(186,26,26,.10);   --tag-rec-fg:#8c1a1a;
+  --tag-info-bg:rgba(47,91,150,.10);  --tag-info-fg:#2b5287;
+
+  --surface:#f6faf8;
+  --surface-dim:#d8e0dd;
+  --surface-bright:#ffffff;
+  --surface-c-lowest:#ffffff;   --surface-c-low:#eef4f2;
+  --surface-c:#e9efed;          --surface-c-high:#e2e9e7;
+  --surface-c-highest:#dbe3e1;
+  --on-surface:#141c1a;         --on-surface-variant:#3f4946;
+  --outline:#6f7976;            --outline-variant:#bfc9c5;
+  --inverse-surface:#2b3231;    --inverse-on-surface:#ecf2f0;
+  --scrim:rgba(16,24,22,.30);
+  --shadow-color:rgba(16,24,22,.10);
+
+  --state-hover:rgba(20,28,26,.06);
+  --state-press:rgba(20,28,26,.10);
+  --state-focus:rgba(20,28,26,.08);
+  --disabled-fg:rgba(20,28,26,.38);
+  --scrollbar:#c4cecb; --scrollbar-hover:#a6b2ae; --scrollbar-active:#8a9691;
+
+  --line2:#aab6b2; --dim:#5c6663;   /* 浅色下比深色更深，才够 AA 4.5:1 */
+  --accent-dim:rgba(0,105,90,.10);
 }
 *{box-sizing:border-box}
 html,body{height:100%}
@@ -42,6 +124,16 @@ body{margin:0;background:var(--surface);color:var(--on-surface);
   -webkit-font-smoothing:antialiased}
 button,input,select,textarea{font:inherit;color:inherit}
 svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+
+/* 深色滚动条：默认隐形（不占视觉），鼠标靠近容器右/下边缘或滚动时淡入 */
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:transparent;border-radius:999px;border:2px solid transparent;
+  background-clip:padding-box;transition:background .18s ease}
+.sb-on::-webkit-scrollbar-thumb{background:#39424b;background-clip:padding-box}
+.sb-on::-webkit-scrollbar-thumb:hover{background:#55606b;background-clip:padding-box}
+.sb-on::-webkit-scrollbar-thumb:active{background:#6b7784;background-clip:padding-box}
+::-webkit-scrollbar-corner{background:transparent}
 
 .shell{height:100vh;min-height:0;display:flex;flex-direction:column;padding:0 22px 0;overflow:hidden}
 
@@ -136,6 +228,9 @@ tbody tr:hover{background:rgba(77,224,203,.05)}
 tbody tr:last-child td{border-bottom:0}
 .room-name{font-weight:500;display:flex;align-items:center;gap:9px}
 .room-name .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.1px}
+/* 主播名即详情入口：去掉操作列的详情按钮后，点名字打开抽屉 */
+.nm-click{cursor:pointer;transition:color .15s}
+.nm-click:hover{color:var(--primary);text-decoration:underline;text-underline-offset:3px}
 @keyframes blink{50%{opacity:.35}}
 .room-url{font-size:11px;color:var(--on-surface-variant);font-family:var(--mono);margin-top:3px;
   max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -214,7 +309,7 @@ td:last-child .link-btn+.link-btn{margin-left:2px}
 
 /* ---------------- footer ----------------
    状态栏默认藏起来：只在底部留一条细边，鼠标移到窗口底边才滑出（不挤压表格） */
-.statusbar{position:fixed;left:0;right:0;bottom:0;z-index:60;height:38px;
+.statusbar{position:fixed;left:0;right:0;bottom:0;z-index:15;height:38px;
   padding:0 18px;border-top:1px solid var(--outline-variant);display:flex;align-items:center;
   gap:12px;font-size:11.5px;color:var(--on-surface-variant);letter-spacing:.2px;
   background:var(--surface-c);box-shadow:0 -6px 18px rgba(0,0,0,.28);
@@ -226,7 +321,7 @@ td:last-child .link-btn+.link-btn{margin-left:2px}
 
 /* ---------------- dialogs ---------------- */
 .modal{position:fixed;inset:0;background:var(--scrim);backdrop-filter:blur(2px);
-  display:grid;place-items:center;z-index:20}
+  display:grid;place-items:center;z-index:30}
 .modal.hidden{display:none}
 .modal-card{width:min(520px,92vw);background:var(--surface-c-high);border-radius:var(--shape-xl);
   box-shadow:var(--e3);overflow:hidden;animation:popIn .22s cubic-bezier(.2,.8,.3,1)}
@@ -272,7 +367,7 @@ td:last-child .link-btn+.link-btn{margin-left:2px}
 /* toast / snackbar */
 .toast{position:fixed;bottom:56px;left:50%;transform:translate(-50%,12px);opacity:0;pointer-events:none;
   background:var(--inverse-surface);color:var(--inverse-on-surface);border-radius:var(--shape-xs);
-  padding:10px 18px;font-size:12.5px;letter-spacing:.2px;transition:.22s ease;z-index:30;box-shadow:var(--e3)}
+  padding:10px 18px;font-size:12.5px;letter-spacing:.2px;transition:.22s ease;z-index:34;box-shadow:var(--e3)}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 
 /* ---------------- popup menu ---------------- */
@@ -288,12 +383,18 @@ td:last-child .link-btn+.link-btn{margin-left:2px}
 .menu-sep{height:1px;background:var(--outline-variant);margin:5px 6px}
 
 /* ---------------- drawer（详情） ---------------- */
-.drawer{position:fixed;inset:0;z-index:22}
+/* 详情用居中对话框（MD3 dialog），不再右侧滑出：高度跟着内容走，底部不会再留一大片空白 */
+.drawer{position:fixed;inset:0;z-index:22;display:grid;place-items:center;padding:24px}
 .drawer.hidden{display:none}
 .drawer-mask{position:absolute;inset:0;background:var(--scrim);backdrop-filter:blur(2px)}
-.drawer-panel{position:absolute;top:0;right:0;bottom:0;width:min(450px,94vw);
-  background:var(--surface-c-low);display:flex;flex-direction:column;
-  animation:slideIn .22s cubic-bezier(.2,.8,.3,1);box-shadow:var(--e3)}
+.drawer-panel{position:relative;width:min(560px,92vw);max-height:min(88vh,860px);
+  background:var(--surface-c-low);border-radius:var(--shape-xl);overflow:hidden;
+  display:flex;flex-direction:column;
+  animation:dialogIn var(--dur-long) var(--ease-emphasized);box-shadow:var(--e3)}
+@keyframes dialogIn{
+  from{opacity:0;transform:translateY(10px) scale(.97)}
+  to{opacity:1;transform:none}
+}
 @keyframes slideIn{from{transform:translateX(32px);opacity:.5}to{transform:none;opacity:1}}
 .drawer-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;
   padding:20px 22px 14px;border-bottom:1px solid var(--outline-variant)}
@@ -317,6 +418,8 @@ td:last-child .link-btn+.link-btn{margin-left:2px}
 .d-row>span{color:var(--on-surface-variant);flex:none}
 .d-row>b{font-weight:500;font-family:var(--mono);font-size:12px;text-align:right;word-break:break-all}
 .d-row>b.wrap{font-family:inherit;font-size:12px;max-width:210px;text-align:right;line-height:1.5}
+/* 画质只在详情页切换，列表不再放下拉框 */
+.d-quality{width:96px;flex:none;text-align:right}
 .d-open{color:var(--primary);font-weight:500;font-size:12px;cursor:pointer;letter-spacing:.3px;
   padding:5px 14px;border-radius:999px;background:var(--accent-dim);
   border:1px solid transparent;transition:.15s;white-space:nowrap}
@@ -325,7 +428,10 @@ td:last-child .link-btn+.link-btn{margin-left:2px}
 .d-row code{font:11.5px var(--mono);color:var(--on-surface-variant);overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap;max-width:200px;display:inline-block;vertical-align:middle}
 /* 移除/保存按钮：紧跟监测开关，不再钉在抽屉底部 */
-.d-actions{display:flex;gap:10px;padding:12px 2px 6px}
+/* 操作按钮吸在对话框可视底部：窗口矮的时候也不用滚动就能点到 */
+.d-actions{display:flex;gap:10px;position:sticky;bottom:-18px;z-index:2;
+  background:var(--surface-c-low);border-top:1px solid var(--outline-variant);
+  margin:12px -22px -18px;padding:10px 22px 14px}
 .d-actions .btn{flex:1;justify-content:center}
 .d-live .room-err{max-width:100%;white-space:normal;margin:6px 0 8px}
 .danger-zone{margin-top:16px;padding-top:14px;border-top:1px solid var(--outline-variant)}
@@ -348,7 +454,7 @@ td:last-child .link-btn+.link-btn{margin-left:2px}
 .tip-wrap::after{content:attr(data-tip);position:absolute;left:50%;bottom:calc(100% + 7px);
   transform:translate(-50%,4px);background:var(--inverse-surface);color:var(--inverse-on-surface);
   font-size:11px;line-height:1;padding:6px 9px;border-radius:var(--shape-xs);white-space:nowrap;
-  opacity:0;pointer-events:none;transition:.14s ease;z-index:40;box-shadow:var(--e2);letter-spacing:.2px}
+  opacity:0;pointer-events:none;transition:.14s ease;z-index:45;box-shadow:var(--e2);letter-spacing:.2px}
 .tip-wrap:hover::after{opacity:1;transform:translate(-50%,0)}
 /* 首行的提示向上弹会压住表头/面板标题：改成向下弹 */
 tbody tr:first-child .tip-wrap::after{top:calc(100% + 7px);bottom:auto;transform:translate(-50%,-4px)}
@@ -406,7 +512,8 @@ tbody tr:first-child .tip-wrap:hover::after{transform:translate(-50%,0)}
 
 /* ---------------- 响应式 ---------------- */
 @media(max-width:720px){
-  .drawer-panel{width:100%}
+  .drawer{padding:14px}
+  .drawer-panel{width:100%;max-height:92vh;border-radius:var(--shape-lg)}
   .drawer-foot{flex-direction:column}
 }
 /* 侧栏（状态 + 日志）保持右侧竖栏，只做横向折叠；
@@ -415,7 +522,7 @@ tbody tr:first-child .tip-wrap:hover::after{transform:translate(-50%,0)}
   .grid{grid-template-columns:minmax(0,1fr) 280px}
   .log-panel{min-width:0}
   table{min-width:0}
-  th:nth-child(4),td:nth-child(4),th:nth-child(5),td:nth-child(5){display:none}
+  .q-col{display:none}
   .statusbar{height:auto;min-height:38px;flex-wrap:wrap;padding:6px 0}
 }
 @media(max-width:720px){
@@ -429,7 +536,6 @@ tbody tr:first-child .tip-wrap:hover::after{transform:translate(-50%,0)}
   .stats{grid-template-columns:1fr 1fr}
   .panel-head{flex-direction:column;align-items:stretch}
   .panel-actions{width:100%}
-  .search{flex:1;width:auto;min-width:90px}
   table{min-width:560px}
   th,td{padding:9px 10px}
   .room-url,.room-err{max-width:210px}
@@ -449,4 +555,178 @@ tbody tr:first-child .tip-wrap:hover::after{transform:translate(-50%,0)}
 .ctx-menu.hidden{display:none}
 .ctx-menu button{border:0;background:transparent;color:var(--on-surface);text-align:left;
   padding:8px 12px;border-radius:8px;font-size:12.5px;cursor:pointer;letter-spacing:.2px}
+
+/* ---------------- 布局切换（单列 / 双列） ---------------- */
+.layout-btn.active{border-color:var(--primary);color:var(--primary)}
+.layout-btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6}
+
+/* 双列：两列紧凑卡片，单行布局，行高贴近单列；DOM 与行内事件不变 */
+.table-wrap.two-col table{display:block;min-width:0;width:100%}
+.table-wrap.two-col thead{display:none}
+.table-wrap.two-col tbody{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:6px 10px;padding:8px 2px 14px;align-content:start}
+.table-wrap.two-col tbody tr{display:grid;
+  grid-template-columns:auto auto minmax(0,1fr) auto auto;
+  grid-template-areas:"status plat name dur actions";
+  gap:8px;align-items:center;min-width:0;min-height:42px;
+  background:var(--surface-c-lowest);border:1px solid var(--outline-variant);
+  border-radius:var(--shape-sm);padding:5px 10px}
+.table-wrap.two-col tbody tr:hover{background:var(--surface-c);border-color:var(--outline)}
+.table-wrap.two-col td{padding:0;border:0;min-width:0;white-space:nowrap}
+/* 窄窗口响应式会隐藏「已录制时长」，双列卡片竖排不受影响 */
+.table-wrap.two-col td.q-col{display:block;text-align:right}
+.table-wrap.two-col td:nth-child(1){grid-area:status}
+.table-wrap.two-col td:nth-child(2){grid-area:plat}
+.table-wrap.two-col td:nth-child(3){grid-area:name;min-width:0}
+.table-wrap.two-col td:nth-child(4){grid-area:dur}
+.table-wrap.two-col td:nth-child(5){grid-area:actions;justify-self:end}
+.table-wrap.two-col .room-name{overflow:hidden;min-width:0}
+.table-wrap.two-col .room-name .nm{display:block;font-size:13px;font-weight:500;
+  overflow:hidden;text-overflow:clip;white-space:nowrap}
+.table-wrap.two-col .nm-txt{display:inline-block;white-space:nowrap}
+/* 只有名字真的放不下才左右往返滚动；hover 暂停，方便点开详情 */
+.table-wrap.two-col .nm.nm-overflow .nm-txt{animation:nmSlide 7s ease-in-out infinite alternate}
+.table-wrap.two-col .nm.nm-overflow:hover .nm-txt{animation-play-state:paused}
+@keyframes nmSlide{
+  0%,18%{transform:translateX(0)}
+  82%,100%{transform:translateX(calc(-1 * var(--nm-shift,0px)))}
+}
+.table-wrap.two-col .row-actions{gap:2px}
+.table-wrap.two-col .tag{font-size:11px;padding:3px 7px}
+.table-wrap.two-col .empty{inset:0}
+@media (max-width:640px){.table-wrap.two-col tbody{grid-template-columns:minmax(0,1fr)}}
+
+/* ============================================================
+   MD3 refinement layer
+   统一 state layer / 焦点环 / 动效 / 触摸区 / 主题细节。
+   集中在这里，避免硬编码颜色散落各处，浅色主题自动继承。
+   ============================================================ */
+
+/* ---- 排版：字号收进 token，便于整体调档 ---- */
+body{font-family:var(--font);font-size:var(--fs-body);line-height:var(--lh-body)}
+.brand-name{font-size:var(--fs-title)}
+.brand-sub{font-size:var(--fs-label-sm)}
+.panel-head h2{font-size:var(--fs-title-sm)}
+.panel-head p{font-size:var(--fs-label)}
+.d-label{font-size:var(--fs-label-sm)}
+.d-row>b{font-size:var(--fs-body-sm)}
+.chip{font-size:var(--fs-body-sm)}
+
+/* ---- 焦点可见性：键盘操作才出环，鼠标点击不打扰 ---- */
+:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.btn:focus-visible,.icon-btn:focus-visible,.icon-act:focus-visible,
+.picker-item:focus-visible,.ctx-menu button:focus-visible{
+  outline:2px solid var(--primary);outline-offset:2px}
+.input:focus-visible,textarea:focus-visible,select.mini:focus-visible{outline:none}
+
+/* ---- 按钮：MD3 state layer（用 currentColor 叠加，暗亮主题都正确） ---- */
+.btn{position:relative;overflow:hidden;
+  transition:background var(--dur-short) var(--ease-standard),
+             box-shadow var(--dur-short) var(--ease-standard),
+             color var(--dur-short) var(--ease-standard),
+             border-color var(--dur-short) var(--ease-standard)}
+.btn::after{content:"";position:absolute;inset:0;background:currentColor;
+  opacity:0;transition:opacity var(--dur-short) var(--ease-standard);pointer-events:none}
+.btn:hover::after{opacity:.08}
+.btn:active::after{opacity:.12}
+.btn:active{transform:scale(.985)}
+.btn.ghost{border-color:var(--outline-variant);color:var(--on-surface)}
+.btn.ghost:hover{background:transparent;border-color:var(--outline);box-shadow:none}
+.btn.primary{background:var(--primary);color:var(--on-primary)}
+.btn.primary.running{background:var(--error-container);color:var(--on-error-container)}
+.btn.tonal{background:var(--secondary-container);color:var(--on-secondary-container)}
+.btn.danger{background:var(--error);color:var(--on-error)}
+.btn.ghost.danger-text{color:var(--error)}
+.btn.ghost.danger-text:hover{border-color:var(--error);background:transparent}
+.btn:disabled,.btn[disabled]{background:transparent;color:var(--disabled-fg);
+  border-color:var(--outline-variant);box-shadow:none;cursor:not-allowed}
+.btn:disabled::after{display:none}
+
+.icon-btn,.icon-act{transition:background var(--dur-short) var(--ease-standard),
+  color var(--dur-short) var(--ease-standard),transform var(--dur-short) var(--ease-standard)}
+.icon-btn:hover,.icon-act:hover{background:var(--state-hover);color:var(--on-surface)}
+.icon-btn:active,.icon-act:active{transform:scale(.94)}
+
+/* ---- 触摸区：图标按钮视觉 32px，实际可点 44px（WCAG / MD3 建议） ---- */
+.icon-act{width:32px;height:32px;position:relative}
+.icon-act::before{content:"";position:absolute;inset:-6px;border-radius:var(--shape-full)}
+.icon-btn{width:40px;height:40px;min-width:40px}
+
+/* ---- 输入框：MD3 outlined field ---- */
+.input,textarea,select.mini{
+  background:var(--surface-c-lowest);border:1px solid var(--outline-variant);
+  border-radius:var(--shape-xs);color:var(--on-surface);
+  transition:border-color var(--dur-short) var(--ease-standard),
+             box-shadow var(--dur-short) var(--ease-standard)}
+.input:hover,textarea:hover,select.mini:hover{border-color:var(--outline)}
+.input:focus,textarea:focus,select.mini:focus{
+  border-color:var(--primary);box-shadow:0 0 0 1px var(--primary);outline:none}
+.input::placeholder,textarea::placeholder{color:var(--disabled-fg)}
+.input.invalid{border-color:var(--error);box-shadow:0 0 0 1px var(--error)}
+
+/* ---- 状态 chip：改用 tonal 容器，半透明叠色在浅色下会发灰 ---- */
+.tag{background:var(--surface-c-highest);color:var(--on-surface-variant)}
+.tag.live{background:var(--tag-live-bg);color:var(--tag-live-fg)}
+.tag.recording,.tag.error{background:var(--tag-rec-bg);color:var(--tag-rec-fg)}
+.tag.wait{background:var(--warning-container);color:var(--warning)}
+.tag.checking{background:var(--tag-info-bg);color:var(--tag-info-fg)}
+
+/* ---- 行内图标：颜色全部走语义 token，浅色主题下才不会"消失" ---- */
+.plat-ico.offline,.plat-ico.idle{color:var(--outline);opacity:1}
+.icon-act.rec{color:var(--primary)}
+.icon-act.del{color:var(--error)}
+.icon-act.stop{color:var(--warning)}
+.icon-act.rec:hover{color:var(--primary);background:var(--accent-dim)}
+.icon-act.del:hover{color:var(--error);background:var(--state-hover)}
+.icon-act.stop:hover{color:var(--warning);background:var(--state-hover)}
+
+/* ---- 面板 / 卡片：tonal surface + 细边框，hover 只提亮不位移 ---- */
+.panel,.stat{background:var(--surface-c-low);box-shadow:none;border:1px solid var(--outline-variant)}
+.stat{transition:background var(--dur-med) var(--ease-standard),
+  border-color var(--dur-med) var(--ease-standard)}
+.stat:hover{background:var(--surface-c);border-color:var(--outline)}
+
+/* ---- 抽屉 / 弹窗：进入动效 + 统一阴影 ---- */
+.modal,.picker,.drawer{animation:fadeIn var(--dur-med) var(--ease-standard)}
+.modal-card,.picker{animation:popIn var(--dur-long) var(--ease-emphasized);box-shadow:var(--e3)}
+.drawer-panel{animation:dialogIn var(--dur-long) var(--ease-emphasized);box-shadow:var(--e3)}
+.d-live{background:var(--surface-c);box-shadow:none;border:1px solid var(--outline-variant)}
+.menu,.ctx-menu{box-shadow:var(--e3);border:1px solid var(--outline-variant)}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes popIn{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
+@keyframes slideIn{from{transform:translateX(14px);opacity:.65}to{transform:none;opacity:1}}
+
+/* ---- 状态栏 / 滚动条：改 token，浅色下不再一团黑 ---- */
+.statusbar{background:var(--surface-c);box-shadow:0 -4px 14px var(--shadow-color)}
+::-webkit-scrollbar-thumb{background:var(--scrollbar)}
+.sb-on::-webkit-scrollbar-thumb{background:var(--scrollbar)}
+.sb-on::-webkit-scrollbar-thumb:hover{background:var(--scrollbar-hover)}
+.sb-on::-webkit-scrollbar-thumb:active{background:var(--scrollbar-active)}
+
+/* ---- 品牌运行指示：呼吸色由 primary 派生，浅色下也不刺眼 ---- */
+.brand-name.running{text-shadow:none}
+@keyframes titleBlink{
+  0%,100%{color:var(--on-surface)}
+  50%{color:var(--primary)}
+}
+
+/* ---- chip / 日志 / 表格：靠色彩层级而不是分割线堆叠 ---- */
+.chip.on{background:var(--accent-dim);border-color:var(--primary);color:var(--primary)}
+.logs{background:var(--surface-c-lowest)}
+.log-row{border-bottom:1px solid var(--outline-variant)}
+.log-row:last-child{border-bottom:0}
+thead th{background:var(--surface-c-low);color:var(--on-surface-variant)}
+tbody tr:hover{background:var(--state-hover)}
+.table-wrap.two-col tbody tr{background:var(--surface-c-lowest);border-color:var(--outline-variant)}
+.table-wrap.two-col tbody tr:hover{background:var(--surface-c-low);border-color:var(--outline)}
+
+/* ---- 主题切换按钮 ---- */
+#btnTheme svg{transition:transform var(--dur-long) var(--ease-emphasized)}
+#btnTheme:active svg{transform:rotate(24deg) scale(.92)}
+
+/* ---- 尊重系统「减少动态效果」 ---- */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.01ms !important;
+    animation-iteration-count:1 !important;transition-duration:.01ms !important}
+}
 .ctx-menu button:hover{background:var(--accent-dim);color:var(--primary)}

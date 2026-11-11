@@ -273,11 +273,14 @@ class Room:
     rec_checked: float = 0
     rec_seconds: float = 0       # 本次录制已持续秒数，列表「已录制时长」直接用
     offline_hits: int = 0
+    viewers: int = 0              # 最近一次检测时的在线人数快照（不落盘）
 
     @property
     def display_name(self) -> str:
-        if self.alias or self.anchor or self.note:
-            return self.alias or self.anchor or self.note
+        # 名字只有两个来源：用户手动设的显示名称、平台解析出的主播昵称。
+        # 备注(note)只是备注，绝不参与名字显示。
+        if self.alias or self.anchor:
+            return self.alias or self.anchor
         # 还没解析出昵称前，不要把整条长链接糊在列表和文件名里
         m = re.search(r'/(\d{4,})/?$', self.url)
         if m:
@@ -299,6 +302,7 @@ class RoomInfo:
     is_live: bool
     stream_url: str = ''
     source: str = ''
+    viewers: int = 0              # 本次探测到的当时在线人数
 
 
 class ResolveError(Exception):
@@ -490,7 +494,17 @@ def clean_anchor_name(name: str, fallback: str = '') -> str:
         elif ch in ' -_.·':
             out.append(ch)
     cleaned = re.sub(r'\s+', ' ', ''.join(out)).strip(' -_.·')
+    # 纯数字是房间号 / uid，不是主播昵称。解析拿不到昵称时曾被它兜底，
+    # 结果列表里整片显示成一串数字，必须在入口就掐掉。
+    if re.fullmatch(r'\d+', cleaned or ''):
+        return ''
     return cleaned or fallback or str(name).strip()
+
+
+def is_junk_anchor(name: str) -> bool:
+    """判断「解析失败留下的占位名」：空、纯数字、单字符。"""
+    s = (name or '').strip()
+    return not s or bool(re.fullmatch(r'\d+', s)) or len(s) <= 1
 
 
 def _anchor_of(info: dict, html: str, rid: str) -> str:
@@ -500,10 +514,11 @@ def _anchor_of(info: dict, html: str, rid: str) -> str:
                   room.get('owner'), room.get('anchor'), info]
     for obj in candidates:
         if isinstance(obj, dict):
-            for key in ('nickname', 'display_id'):
-                v = obj.get(key)
-                if isinstance(v, str) and v.strip():
-                    return v.strip()
+            # 只认 nickname：display_id 是抖音号（'1'/'Y' 这类短串），拿它当主播名
+            # 会把好名字覆盖成乱码编号
+            v = obj.get('nickname')
+            if isinstance(v, str) and v.strip():
+                return v.strip()
     # 兜底：HTML 里的 anchor/nickname 是转义形式（\"anchor\":{...}），先反转义再匹配
     clean = html.replace('\\"', '"').replace('\\\\', '\\').replace('\\u0026', '&')
     for pat in (r'"anchor":\{[^}]*?"nickname":"([^"]+)"',
@@ -516,6 +531,31 @@ def _anchor_of(info: dict, html: str, rid: str) -> str:
             if name:
                 return name
     return rid
+
+
+def _viewers_of(room: dict) -> int:
+    """取「当时在线人数」快照：优先 room_view_stats.display_value（数值），
+    其次 user_count_str。大房间可能给「1.2万」这种缩写，一并换算。
+    拿不到返回 0，前端显示「—」。
+    """
+    if not isinstance(room, dict):
+        return 0
+    stats = room.get('room_view_stats')
+    detail = room.get('stats')
+    candidates = [stats.get('display_value') if isinstance(stats, dict) else None,
+                  room.get('user_count_str'),
+                  detail.get('user_count_str') if isinstance(detail, dict) else None]
+    for v in candidates:
+        if v is None or v == '':
+            continue
+        s = str(v).strip()
+        try:
+            if '万' in s:
+                return max(0, int(float(s.replace('万', '')) * 10000))
+            return max(0, int(float(s)))
+        except (TypeError, ValueError):
+            continue
+    return 0
 
 
 DY_API = ('https://live.douyin.com/webcast/room/web/enter/?aid=6383&app_name=douyin_web'
@@ -566,12 +606,15 @@ def _douyin(url: str, cfg: dict, prefer: str = 'flv') -> RoomInfo:
         anchor = clean_anchor_name((room.get('owner') or {}).get('nickname') or '', '')
         title = room.get('title') or ''
         stream = _extract_stream(room, prefer)
-        if room.get('status') == 2 or stream:
+        live = room.get('status') == 2 or bool(stream)
+        viewers = _viewers_of(room) if live else 0
+        if live:
             if not stream:
                 raise ResolveError('NO_STREAM', '已开播但未解析到流地址（可能仅支持 App 端）')
             return RoomInfo(anchor=anchor, title=title, is_live=True,
-                            stream_url=stream, source='douyin')
-        return RoomInfo(anchor=anchor, title=title, is_live=False, source='douyin')
+                            stream_url=stream, source='douyin', viewers=viewers)
+        return RoomInfo(anchor=anchor, title=title, is_live=False,
+                        source='douyin', viewers=0)
 
     cookie = _dy_cookie(cfg)
     try:
@@ -597,18 +640,21 @@ def _douyin(url: str, cfg: dict, prefer: str = 'flv') -> RoomInfo:
     pace_speedup('抖音')
     info = _parse_room_store(html)
     room = info.get('room') if isinstance(info.get('room'), dict) else info
-    anchor = clean_anchor_name(_anchor_of(info, html, rid), rid)
+    anchor = clean_anchor_name(_anchor_of(info, html, rid), '')
     title = room.get('title') or ''
     status = room.get('status')
     stream = _extract_stream(room, prefer)
+    live = status == 2 or bool(stream)
+    viewers = _viewers_of(room) if live else 0
     # status: 2=直播中，4=已结束。以「能否取到流地址」为准，
     # 因为 HTML 里的 roomStore 可能是 SSR 缓存，状态会滞后于真实开播。
-    if status == 2 or stream:
+    if live:
         if not stream:
             raise ResolveError('NO_STREAM', '已开播但未解析到流地址（可能仅支持 App 端）')
         return RoomInfo(anchor=anchor, title=title, is_live=True,
-                        stream_url=stream, source='douyin')
-    return RoomInfo(anchor=anchor, title=title, is_live=False, source='douyin')
+                        stream_url=stream, source='douyin', viewers=viewers)
+    return RoomInfo(anchor=anchor, title=title, is_live=False,
+                    source='douyin', viewers=0)
 
 
 KS_UID_RE = re.compile(r'live\.kuaishou\.com/(?:u|profile|fw/live)/([^/?#]+)')
@@ -721,7 +767,7 @@ def _kuaishou(url: str, cfg: dict) -> RoomInfo:
             name = re.sub(r'[-－]\s*快手直播\s*$', '', t.group(1)).strip()
     if name in ('快手直播', '快手'):
         name = ''
-    anchor = clean_anchor_name(name, uid or '快手直播间')
+    anchor = clean_anchor_name(name, '')
     living = bool(first.get('isLiving'))
     if living:
         stream = _ks_pick_stream(live_stream, cfg.get('quality', '原画'))
@@ -804,12 +850,12 @@ def _xhs(url: str, cfg: dict) -> RoomInfo:
         # 连房间号都没有：不是「没开播」，而是这次没拿到数据（登录态/风控/网络）
         raise ResolveError('NO_DATA', '小红书返回空房间数据，可能需要登录 Cookie 或稍后重试')
     if ls.get('liveStatus') != 'success':
-        return RoomInfo(anchor=clean_anchor_name(anchor, rid), title=title,
+        return RoomInfo(anchor=clean_anchor_name(anchor, ''), title=title,
                         is_live=False, source='xiaohongshu')
     stream = _xhs_pick_stream(room.get('pullConfig'), cfg.get('quality', '原画'))
     if not stream:
         raise ResolveError('NO_STREAM', '已开播但未解析到播放地址（可能为付费/私密直播）')
-    return RoomInfo(anchor=clean_anchor_name(anchor, rid), title=title,
+    return RoomInfo(anchor=clean_anchor_name(anchor, ''), title=title,
                     is_live=True, stream_url=stream, source='xiaohongshu')
 
 
@@ -829,6 +875,12 @@ def resolve(url: str, cfg: dict, prefer: str = 'flv') -> RoomInfo:
     if 'xiaohongshu.com' in url or 'xhslink.com' in url:
         return _xhs(url, cfg)
     raise ResolveError('UNSUPPORTED', f'暂不支持该地址：{url}')
+
+
+# 导入时只认地址本身。别人的导出文件常见「URL,主播名」「画质,URL,备注」
+# 「时间,URL」这类格式，一律只抓 URL：主播名靠平台解析，画质用全局默认，
+# 备注只由用户在详情里手填 —— 不让导入文件往这两个字段里塞东西。
+_IMPORT_URL_RE = re.compile(r'(?:https?|demo)://[^\s,，;；"\'<>|]+', re.I)
 
 
 def room_id(url: str) -> str:
@@ -896,12 +948,25 @@ class Engine:
         try:
             if self.rooms_path().is_file():
                 data = json.loads(self.rooms_path().read_text(encoding='utf-8'))
+                migrated = False
                 for item in data:
                     r = Room(**{k: v for k, v in item.items() if k in Room.__dataclass_fields__})
                     r.status = 'idle'
                     r.file = ''
                     r.started_at = 0
+                    # 名字只来自 alias(手改) / anchor(抖音解析)，备注只作个人记忆。
+                    # 早期为回滚「备注被搬成显示名」临时加的两条自动互填已撤销：
+                    # 它们分不清「历史误改」和「正常新房间」——前者会把主播名写进
+                    # 空备注（每次启动都写），后者会把只填了显示名的房间名字搬走。
+                    # 旧版解析失败时用房间号冒充昵称，清掉，别再显示一串数字
+                    if is_junk_anchor(r.anchor):
+                        if r.anchor:
+                            r.anchor = ''
+                            migrated = True
                     self.rooms[r.id] = r
+                if migrated:
+                    self._save_rooms()
+                    self.log('info', '已归位历史字段：备注、显示名称与无效昵称')
         except Exception as e:
             self.log('error', f'房间列表读取失败: {e}')
 
@@ -922,37 +987,37 @@ class Engine:
                               'level': level, 'text': str(text)[:400]})
 
     # ---------- 房间管理 ----------
-    def add_rooms(self, lines: list[str]) -> tuple[int, int]:
-        added, skipped = 0, 0
+    def add_rooms(self, lines: list[str]) -> tuple[int, int, int]:
+        """只从每行里抓 URL，其他内容一概不取。
+
+        返回值 (新增, 重复, 无地址行)。导入文件里的备注/主播名/画质
+        全部丢弃：名字靠平台解析，备注只由用户在详情里手填。
+        """
+        added = skipped = ignored = 0
         with self.lock:
             for raw in lines:
                 line = raw.strip()
                 if not line or line.startswith('#'):
                     continue
-                quality, note, url = self.cfg['quality'], '', line
-                if ',' in line:
-                    parts = [p.strip() for p in line.split(',', 2)]
-                    if parts[0] in ('原画', '超清', '高清', '标清', '流畅'):
-                        quality, url = parts[0], parts[1]
-                    else:
-                        url, note = parts[0], parts[-1]
-                    if len(parts) == 3:
-                        note = parts[2]
-                    # 兼容「url,主播: 名字」这种常见贴法：前缀只是说明，不该进名字
-                    note = re.sub(r'^主播\s*[:：]\s*', '', note).strip()
+                m = _IMPORT_URL_RE.search(line)
+                if not m:
+                    ignored += 1          # 整行没有地址，忽略
+                    continue
+                url = m.group(0).rstrip('.,;:!?）)】]》>')
                 rid = room_id(url)
                 if rid in self.rooms:
                     skipped += 1
                     continue
-                self.rooms[rid] = Room(id=rid, url=url, note=note, quality=quality)
+                self.rooms[rid] = Room(id=rid, url=url, quality=self.cfg['quality'])
                 # 新加入的房间立刻检查：用户刚粘贴就想看到结果，
                 # 真正的削峰由并发上限 + 调度器抖动负责，而不是让人干等。
                 self.next_check[rid] = 0
                 self._fresh[rid] = time.time()
                 added += 1
             self._save_rooms()
-        self.log('info', f'导入完成：新增 {added}，跳过重复 {skipped}')
-        return added, skipped
+        tail = f'，忽略无地址 {ignored} 行' if ignored else ''
+        self.log('info', f'导入完成：新增 {added}，跳过重复 {skipped}{tail}')
+        return added, skipped, ignored
 
     def update_room(self, rid: str, patch: dict) -> bool:
         with self.lock:
@@ -1078,10 +1143,30 @@ class Engine:
                         # 录制中的房间也要按时复检：否则主播下播后 ffmpeg 会一直挂着
                         if self.next_check.get(rid, 0) <= now:
                             due.append(rid)
-                # 新加的房间插队；其余按到期时间排序（最久没查的先查），
-                # 避免每次都是列表前几行被反复检查、后面的永远轮不到。
-                due.sort(key=lambda rid: (0 if rid in self._fresh else 1,
-                                          self.next_check.get(rid, 0.0)))
+                # 新加的房间插队；其余按「扫描优先级」排序：
+                #   分数 = 逾期时长 + 最近开播加成 —— 最近开播/正在播的主播优先检测
+                #   （刚播过的更可能马上再播），同时逾期分随时间线性增长，
+                #   保证一直没播的房间最终也能轮到（不会被饿死）。
+                interval = max(5, self.cfg['interval'])
+
+                def _prio(rid: str):
+                    r = self.rooms[rid]
+                    due_at = self.next_check.get(rid, 0.0)
+                    overdue = now - due_at
+                    age = now - (r.last_live or 0.0)
+                    if r.status in ('recording', 'live'):
+                        bonus = 8.0 * interval        # 在播/录制中：高频复检以及时发现下播
+                    elif age < 1800:
+                        bonus = 5.0 * interval        # 半小时内播过
+                    elif age < 7200:
+                        bonus = 3.0 * interval        # 2 小时内播过
+                    elif age < 21600:
+                        bonus = 1.5 * interval        # 6 小时内播过
+                    else:
+                        bonus = 0.0
+                    return (0 if rid in self._fresh else 1, -(overdue + bonus), due_at)
+
+                due.sort(key=_prio)
                 with self.lock:
                     budget = max(1, int(self.cfg['concurrency'])) - len(self._inflight)
                 for rid in due:
@@ -1266,6 +1351,7 @@ class Engine:
                 if info.title:
                     r.title = info.title
                 r.source = info.source or r.source
+                r.viewers = info.viewers   # 每次检测刷新「当时在线人数」快照
                 r.error = ''
                 self._fresh.pop(rid, None)      # 已确认过一次，恢复正常排队
                 if renamed:
@@ -1749,6 +1835,7 @@ class Engine:
             if info.anchor:
                 r.anchor = info.anchor
             r.title = info.title or r.title
+            r.viewers = info.viewers
             r.last_check = time.time()
             if not info.is_live or not info.stream_url:
                 r.offline_hits += 1

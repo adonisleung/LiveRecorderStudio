@@ -74,6 +74,101 @@ def list_dirs(target: str) -> dict:
     return {'path': str(p), 'parent': parent, 'dirs': dirs[:600], 'root': False}
 
 
+def clipboard_text() -> str:
+    """读本机剪贴板里的文字（CF_UNICODETEXT）。
+
+    前端的 navigator.clipboard.readText() 在 WebView2 里要过权限，容易弹
+    「允许访问剪贴板？」的原生提示；改由本地进程直接读系统剪贴板，
+    既不弹窗，也不受浏览器权限模型影响。
+    """
+    if os.name != 'nt':
+        return ''
+    import ctypes
+    CF_UNICODETEXT = 13
+    u, k = ctypes.windll.user32, ctypes.windll.kernel32
+    # 64 位进程里句柄是指针：不声明 restype/argtypes 会被截成 32 位，读出来永远是空
+    u.OpenClipboard.argtypes = [ctypes.c_void_p]
+    u.GetClipboardData.restype = ctypes.c_void_p
+    u.GetClipboardData.argtypes = [ctypes.c_uint]
+    k.GlobalLock.restype = ctypes.c_void_p
+    k.GlobalLock.argtypes = [ctypes.c_void_p]
+    k.GlobalUnlock.argtypes = [ctypes.c_void_p]
+    if not u.OpenClipboard(None):
+        return ''
+    try:
+        h = u.GetClipboardData(CF_UNICODETEXT)
+        if not h:
+            return ''
+        p = k.GlobalLock(h)
+        if not p:
+            return ''
+        try:
+            return ctypes.wstring_at(p)
+        finally:
+            k.GlobalUnlock(h)
+    except Exception:
+        return ''
+    finally:
+        u.CloseClipboard()
+
+
+def pick_directory(title: str = '选择录制文件的保存位置') -> dict:
+    """弹系统原生「选择文件夹」对话框（ctypes 直调 shell32，零第三方依赖）。
+
+    对齐 StreamCap 那类 Flet 应用 FilePicker.get_directory_path() 的做法：
+    用系统对话框选目录，比自绘目录树快得多，也自带网络路径/新建文件夹。
+    取消返回 {'ok': False, 'cancel': True}，前端据此静默返回、回退内置选择器。
+    """
+    if os.name != 'nt':
+        return {'ok': False, 'error': '仅支持 Windows'}
+    import ctypes
+    from ctypes import wintypes
+
+    BIF_RETURNONLYFSDIRS = 0x0001
+    BIF_NEWDIALOGSTYLE = 0x0040
+    BIF_EDITBOX = 0x0010
+
+    class BROWSEINFOW(ctypes.Structure):
+        _fields_ = [('hwndOwner', wintypes.HWND),
+                    ('pidlRoot', ctypes.c_void_p),
+                    ('pszDisplayName', wintypes.LPWSTR),
+                    ('lpszTitle', wintypes.LPCWSTR),
+                    ('ulFlags', wintypes.UINT),
+                    ('lpfn', ctypes.c_void_p),
+                    ('lParam', wintypes.LPARAM),
+                    ('iImage', ctypes.c_int)]
+
+    try:
+        ctypes.windll.ole32.CoInitialize(None)
+    except Exception:
+        pass
+
+    shell32 = ctypes.windll.shell32
+    # 64 位下不声明 restype/argtypes，指针会被截断成 int 直接崩，必须显式声明
+    shell32.SHBrowseForFolderW.restype = ctypes.c_void_p
+    shell32.SHBrowseForFolderW.argtypes = [ctypes.POINTER(BROWSEINFOW)]
+    shell32.SHGetPathFromIDListW.argtypes = [ctypes.c_void_p, wintypes.LPWSTR]
+    ctypes.windll.ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
+
+    name = ctypes.create_unicode_buffer(260)
+    bi = BROWSEINFOW()
+    bi.hwndOwner = None
+    bi.pidlRoot = None
+    bi.pszDisplayName = ctypes.cast(name, wintypes.LPWSTR)
+    bi.lpszTitle = title
+    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE | BIF_EDITBOX
+
+    pidl = shell32.SHBrowseForFolderW(ctypes.byref(bi))
+    if not pidl:
+        return {'ok': False, 'cancel': True}
+    out = ctypes.create_unicode_buffer(260)
+    got = shell32.SHGetPathFromIDListW(pidl, out)
+    ctypes.windll.ole32.CoTaskMemFree(pidl)
+    if not got or not out.value:
+        return {'ok': False, 'error': '没有取到路径'}
+    return {'ok': True, 'path': out.value}
+
+
 def _quit_trace(msg: str):
     try:
         logdir = DATA_DIR / 'logs'
@@ -169,6 +264,10 @@ def make_handler(engine: Engine):
             if path == '/api/browse':
                 target = (parse_qs(parsed.query).get('path') or [''])[0]
                 return self._json(list_dirs(target))
+            if path == '/api/clipboard':
+                return self._json({'text': clipboard_text()})
+            if path == '/api/pick-dir':
+                return self._json(pick_directory())
             if path.startswith('/preview/'):
                 name = path[len('/preview/'):]
                 target = (DATA_DIR / 'preview' / name).resolve()
@@ -186,8 +285,9 @@ def make_handler(engine: Engine):
                 if path == '/api/rooms':
                     text = body.get('text', '')
                     lines = body.get('lines') if isinstance(body.get('lines'), list) else text.splitlines()
-                    added, skipped = engine.add_rooms(lines)
-                    return self._json({'ok': True, 'added': added, 'skipped': skipped})
+                    added, skipped, ignored = engine.add_rooms(lines)
+                    return self._json({'ok': True, 'added': added,
+                                       'skipped': skipped, 'ignored': ignored})
                 if path == '/api/rooms/clear':
                     return self._json({'ok': True, 'removed': engine.clear_rooms()})
                 if path.startswith('/api/rooms/') and path.endswith('/preview'):
@@ -648,10 +748,14 @@ def _enable_context_menu(win):
                         def on_perm(sender, args):
                             try:
                                 kind = str(args.PermissionKind)
+                                # 枚举真实取值是 Default=0 / Allow=1 / Deny=2。
+                                # 之前写成 0 和 1：0 是 Default，剪贴板读会退化成
+                                # WebView2 原生「允许访问剪贴板？」提示（就是弹窗警告）；
+                                # 1 又是 Allow，把其他权限全放行了。两个方向都错。
                                 if 'Clipboard' in kind or 'clipboard' in kind:
-                                    args.State = 0        # CoreWebView2PermissionState.Allow
+                                    args.State = 1        # Allow
                                 else:
-                                    args.State = 1        # Deny
+                                    args.State = 2        # Deny
                             except Exception:
                                 pass
                         core.PermissionRequested += on_perm
