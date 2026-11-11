@@ -1052,6 +1052,19 @@ class Engine:
             self._save_rooms()
             return n
 
+    def remove_matching(self, pattern: str) -> int:
+        """按主播显示名正则匹配批量移除（不会删已录制文件）。"""
+        with self.lock:
+            rex = re.compile(pattern)
+            targets = [rid for rid, r in self.rooms.items() if rex.search(r.display_name)]
+            for rid in targets:
+                self._stop_record(rid)
+                self.rooms.pop(rid, None)
+                self.next_check.pop(rid, None)
+            if targets:
+                self._save_rooms()
+            return len(targets)
+
     # ---------- 引擎 ----------
     def start(self):
         with self.lock:

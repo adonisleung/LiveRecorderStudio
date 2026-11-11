@@ -290,6 +290,16 @@ def make_handler(engine: Engine):
                                        'skipped': skipped, 'ignored': ignored})
                 if path == '/api/rooms/clear':
                     return self._json({'ok': True, 'removed': engine.clear_rooms()})
+                if path == '/api/rooms/remove-matching':
+                    pattern = body.get('pattern', '')
+                    if not pattern:
+                        return self._json({'error': '缺少匹配规则'}, 400)
+                    try:
+                        re.compile(pattern)
+                    except re.error as e:
+                        return self._json({'error': f'正则无效: {e}'}, 400)
+                    removed = engine.remove_matching(pattern)
+                    return self._json({'ok': True, 'removed': removed})
                 if path.startswith('/api/rooms/') and path.endswith('/preview'):
                     rid = path.split('/')[3]
                     return self._json(engine.preview(rid))
@@ -452,11 +462,37 @@ def find_running_instance(start: int) -> int | None:
     必须绕开系统代理：开了 Clash 之类的代理后 http_proxy 会指向 127.0.0.1:7890，
     urllib 默认会把 127.0.0.1 的请求也塞给代理，返回 502 → 误判「没有实例」，
     于是启动第二个进程，同一个房间被录两遍。
+
+    性能：不能对每个端口串行发 HTTP 请求等超时 —— 本机（尤其装了代理/VPN 驱动时）
+    对未监听端口的拒绝有延迟，12 个端口 × 0.5s ≈ 6 秒，全压在启动路径上。
+    改为先用底层 socket 并行探活（一次超时的时间），只对真正连得上的端口做 HTTP 校验。
     """
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    for port in range(start, start + 12):
+    import socket
+    from concurrent.futures import ThreadPoolExecutor
+
+    def alive(port: int) -> int | None:
+        s = socket.socket()
+        s.settimeout(0.12)
         try:
-            with opener.open(f'http://127.0.0.1:{port}/api/state', timeout=0.5) as r:
+            return port if s.connect_ex(('127.0.0.1', port)) == 0 else None
+        except OSError:
+            return None
+        finally:
+            try:
+                s.close()
+            except OSError:
+                pass
+
+    ports = list(range(start, start + 12))
+    with ThreadPoolExecutor(max_workers=len(ports)) as pool:
+        cand = [p for p in pool.map(alive, ports) if p]
+    if not cand:
+        return None
+
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    for port in cand:
+        try:
+            with opener.open(f'http://127.0.0.1:{port}/api/state', timeout=1.5) as r:
                 data = json.loads(r.read().decode('utf-8'))
             if isinstance(data, dict) and 'rooms' in data and 'stats' in data:
                 return port

@@ -203,11 +203,18 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke
 .panel-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 
 /* ---------------- layout ---------------- */
-.grid{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;padding:16px 0;
-  min-height:0;overflow:hidden;transition:grid-template-columns .18s ease}
-.grid.side-collapsed{grid-template-columns:minmax(0,1fr) 0;gap:0}
+/* 侧栏（状态统计 + 运行日志）改为浮层覆盖：展开时压在上层，
+   不再挤压直播间列表 —— 也就不会让上千张卡片重新排版。 */
+.grid{flex:1;display:grid;grid-template-columns:minmax(0,1fr);gap:0;padding:16px 0;
+  min-height:0;overflow:hidden;position:relative}
 .grid.side-collapsed .side{display:none}
-.side{display:flex;flex-direction:column;gap:16px;min-height:0}
+.side{position:fixed;right:0;top:var(--side-top,72px);bottom:0;z-index:18;
+  width:min(330px,88vw);padding:14px 15px;
+  display:flex;flex-direction:column;gap:14px;min-height:0;overflow:auto;
+  background:var(--surface);border-left:1px solid var(--outline-variant);
+  box-shadow:-10px 0 28px var(--shadow-color);
+  animation:sideIn var(--dur-med) var(--ease-standard)}
+@keyframes sideIn{from{transform:translateX(14px);opacity:.55}to{transform:none;opacity:1}}
 
 .stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .stat{background:var(--panel);border-radius:var(--shape-lg);padding:13px 15px;box-shadow:var(--e1)}
@@ -222,7 +229,7 @@ table{width:100%;border-collapse:collapse;font-size:13px;min-width:820px}
 th{text-align:left;font-size:11px;color:var(--on-surface-variant);font-weight:500;letter-spacing:.8px;
   white-space:nowrap;padding:11px 14px;border-bottom:1px solid var(--outline-variant);
   position:sticky;top:0;background:var(--panel);z-index:1}
-td{padding:11px 14px;border-bottom:1px solid rgba(57,66,75,.55);vertical-align:middle}
+td{padding:11px 14px;border-bottom:1px solid var(--outline-variant);vertical-align:middle}
 tbody tr{transition:background .15s}
 tbody tr:hover{background:rgba(77,224,203,.05)}
 tbody tr:last-child td{border-bottom:0}
@@ -300,7 +307,7 @@ td:last-child .link-btn+.link-btn{margin-left:2px}
 .logs{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
   padding:10px 14px 14px;font:11.5px/1.7 var(--mono);scrollbar-gutter:stable}
 .logs.hidden{display:none}
-.log-row{display:flex;gap:9px;padding:2px 0;border-bottom:1px solid rgba(57,66,75,.4)}
+.log-row{display:flex;gap:9px;padding:2px 0;border-bottom:1px solid var(--outline-variant)}
 .log-t{color:var(--dim);flex:none}
 .log-lv{flex:none;width:40px;text-transform:uppercase;font-size:10px;letter-spacing:.5px;padding-top:1px}
 .log-lv.ok{color:var(--primary)} .log-lv.error{color:var(--error)}
@@ -330,13 +337,66 @@ td:last-child .link-btn+.link-btn{margin-left:2px}
 .modal-head h3{margin:0;font-size:18px;font-weight:500;letter-spacing:.2px;
   display:flex;align-items:center;gap:10px}
 .modal-head h3:before{content:"";width:3px;height:16px;border-radius:2px;background:var(--primary)}
-.modal-body{padding:12px 24px 20px}
-.modal-foot{display:flex;justify-content:flex-end;gap:10px;padding:12px 24px 20px}
+.modal-body{padding:12px 22px 10px}
+/* 内容可滚动：设置弹窗字段多，超高时在弹窗内滚动，不再被遮罩截断底部文字 */
+.modal-card{display:flex;flex-direction:column;max-height:min(92vh,880px)}
+.modal-card .modal-head{flex:none}
+.modal-card .modal-body{overflow-y:auto;flex:1;min-height:0}
+.modal-card .modal-foot{flex:none;border-top:1px solid var(--outline-variant)}
+.modal-foot{display:flex;align-items:center;justify-content:flex-end;gap:10px;padding:8px 22px 16px}
+/* 底栏左侧的附加按钮（如导入里的 粘贴/导出列表），与取消/确认同一行 */
+.modal-foot .foot-left{display:flex;gap:9px;margin-right:auto}
+.modal-foot .foot-left .btn{min-width:0;height:38px}
+.modal-foot .foot-left .btn.small{font-size:12.5px;padding:0 14px}
 .modal-foot .btn{min-width:88px;justify-content:center;height:38px}
 .modal textarea{width:100%;height:200px;resize:vertical;background:var(--surface-c-lowest);
   border:1px solid var(--outline);border-radius:var(--shape-xs);padding:12px;outline:none;
   font:12.5px/1.75 var(--mono);color:var(--on-surface);box-shadow:inset 0 1px 2px rgba(0,0,0,.25)}
 .modal textarea:focus{border-color:var(--primary);box-shadow:0 0 0 1px var(--primary)}
+/* 点弹窗外空白即可关闭的弹窗，右上角 × 是多余的、容易误触 */
+.modal-card.hide-close .modal-head .icon-btn{display:none}
+/* 内容少的弹窗（如导入）：整体收窄，输入框也不必留 200px 那么高 */
+.modal-card.narrow{width:min(380px,92vw)}
+.modal-card.narrow .modal-head{padding:16px 20px 6px}
+/* 内容少的弹窗去掉右上角 ×：点弹窗外空白即可关闭，少一个容易误触的控件 */
+.modal-card.narrow .modal-head .icon-btn{display:none}
+.modal-card.narrow .modal-head h3{font-size:16px}
+.modal-card.narrow .modal-body{padding:10px 20px 8px}
+.modal-card.narrow textarea{height:150px}
+/* 四个按钮等宽铺满整行，中间不留空白 */
+.modal-card.narrow .modal-foot{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:7px;align-items:center;padding:6px 20px 14px}
+.modal-card.narrow .modal-foot .foot-left{display:contents}
+.modal-card.narrow .modal-foot .btn{min-width:0;width:100%;justify-content:center;
+  height:36px;font-size:12px;padding:0 4px}
+
+/* 设置弹窗：字段多，收窄到 420px，右上角 × 去掉（点空白/ESC 关闭）。
+   窄宽下字段一律单列排布，避免 auto-fit 多列在窄宽里挤成错乱换行 */
+.modal-card.settings{width:min(420px,92vw)}
+.modal-card.settings .modal-head{padding:16px 20px 6px}
+.modal-card.settings .modal-head .icon-btn{display:none}
+.modal-card.settings .modal-head h3{font-size:16px}
+.modal-card.settings .modal-body{padding:10px 20px 8px}
+.modal-card.settings .field-row{grid-template-columns:1fr;gap:10px}
+.modal-card.settings .field-row.two-col{grid-template-columns:1fr 1fr;gap:10px 12px}
+.modal-card.settings .field-row.two-col .field{margin-bottom:0}
+.modal-card.settings .field{margin-bottom:13px}
+.modal-card.settings .field-row .field{margin-bottom:13px}
+.modal-card.settings textarea{height:64px}
+.modal-card.settings .key-box{flex-direction:column;align-items:stretch;gap:5px}
+.modal-card.settings .key-label{flex:none;width:auto}
+
+/* 正则移除直播间：输入 + 实时匹配数 + 移除按钮，收窄下单行排布 */
+.remove-re{display:flex;gap:8px;align-items:flex-start}
+.remove-re .input{flex:1;min-width:0}
+.remove-re .btn{flex:none;height:34px}
+.remove-re-count{font-size:11px;color:var(--on-surface-variant);margin:6px 0 0;min-height:15px}
+.remove-re-count b{color:var(--primary)}
+.remove-re-count .warn{color:var(--amber)}
+/* 代理地址输入框 + 「跟随系统代理」复选框同一行 */
+.proxy-row{display:flex;align-items:center;gap:10px}
+.proxy-row .input{flex:1;min-width:0}
+.proxy-row .check{flex:none;white-space:nowrap;font-size:12px}
 
 /* MD3 outlined text field */
 .field{margin-bottom:17px}
@@ -355,14 +415,14 @@ td:last-child .link-btn+.link-btn{margin-left:2px}
 .hint code{background:rgba(227,233,238,.06);padding:1px 5px;border-radius:var(--shape-xs)}
 
 .input{background:var(--surface-c-lowest);border:1px solid var(--outline);border-radius:var(--shape-xs);
-  padding:9px 12px;outline:none;transition:.16s;color:var(--on-surface)}
+  padding:7px 10px;font-size:12.5px;outline:none;transition:.16s;color:var(--on-surface)}
 .input:focus{border-color:var(--primary);box-shadow:0 0 0 1px var(--primary)}
 .input::placeholder{color:var(--dim)}
 .check{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--on-surface-variant);cursor:pointer}
 .check input{accent-color:var(--primary);width:16px;height:16px;cursor:pointer}
 
 /* 导入弹窗工具条 */
-.import-bar{display:flex;gap:9px;margin:12px 0 4px}
+.import-bar{display:flex;gap:9px;margin:11px 0 0}
 
 /* toast / snackbar */
 .toast{position:fixed;bottom:56px;left:50%;transform:translate(-50%,12px);opacity:0;pointer-events:none;
@@ -387,7 +447,7 @@ td:last-child .link-btn+.link-btn{margin-left:2px}
 .drawer{position:fixed;inset:0;z-index:22;display:grid;place-items:center;padding:24px}
 .drawer.hidden{display:none}
 .drawer-mask{position:absolute;inset:0;background:var(--scrim);backdrop-filter:blur(2px)}
-.drawer-panel{position:relative;width:min(560px,92vw);max-height:min(88vh,860px);
+.drawer-panel{position:relative;width:min(340px,94vw);max-height:min(90vh,880px);
   background:var(--surface-c-low);border-radius:var(--shape-xl);overflow:hidden;
   display:flex;flex-direction:column;
   animation:dialogIn var(--dur-long) var(--ease-emphasized);box-shadow:var(--e3)}
@@ -397,48 +457,83 @@ td:last-child .link-btn+.link-btn{margin-left:2px}
 }
 @keyframes slideIn{from{transform:translateX(32px);opacity:.5}to{transform:none;opacity:1}}
 .drawer-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;
-  padding:20px 22px 14px;border-bottom:1px solid var(--outline-variant)}
-.drawer-head h3{margin:0;font-size:17px;font-weight:500;word-break:break-all;
+  padding:14px 15px 4px}
+.drawer-head h3{margin:0;font-size:16px;font-weight:500;word-break:break-all;
   display:flex;align-items:center;gap:10px}
 .drawer-head h3:before{content:"";width:3px;height:15px;border-radius:2px;background:var(--primary);flex:none}
-.drawer-head p{margin:4px 0 0;font-size:11.5px;color:var(--on-surface-variant)}
-.drawer-body{flex:1;overflow:auto;padding:18px 22px}
+.drawer-head p{margin:3px 0 0;font-size:11px;color:var(--on-surface-variant)}
+.drawer-body{flex:1;overflow:auto;padding:12px 15px 10px}
 .drawer-foot{display:flex;gap:10px;padding:14px 22px 20px;border-top:1px solid var(--outline-variant);flex-wrap:wrap}
 .drawer-foot .btn{flex:1;justify-content:center}
 .drawer-foot:empty{display:none}   /* 操作按钮已内联，底栏留空即隐藏 */
 
-.d-section{margin-bottom:18px}
+.d-section{margin-bottom:13px}
 .d-section:last-child{margin-bottom:0}
-.d-label{display:block;font-size:11px;color:var(--on-surface-variant);letter-spacing:.8px;margin-bottom:7px}
+.d-label{display:block;font-size:11px;color:var(--on-surface-variant);letter-spacing:.8px;margin-bottom:5px}
 .d-section .input{width:100%}
-.d-live{border-radius:var(--shape-md);padding:4px 14px;background:var(--surface-c);box-shadow:var(--e1)}
-.d-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8.5px 0;
-  border-bottom:1px solid rgba(57,66,75,.5);font-size:12.5px}
+.d-live{border-radius:var(--shape-md);padding:6px;background:var(--surface-c);box-shadow:var(--e1);
+  /* 两列 key-value：内容都短，拉满整行会留一大片空白 */
+  display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.d-row{display:flex;justify-content:space-between;align-items:center;gap:6px;
+  height:30px;min-height:30px;padding:0 8px;border:0;border-radius:var(--shape-xs);
+  background:var(--surface-c-lowest);font-size:11.5px;min-width:0}
+/* 标题、链接、文件名、开关这类需要整行宽度 */
+.d-row.span2,.d-actions,.d-live>.room-err{grid-column:1/-1}
 .d-row:last-child{border-bottom:0}
 .d-row>span{color:var(--on-surface-variant);flex:none}
-.d-row>b{font-weight:500;font-family:var(--mono);font-size:12px;text-align:right;word-break:break-all}
-.d-row>b.wrap{font-family:inherit;font-size:12px;max-width:210px;text-align:right;line-height:1.5}
+.d-row>b{font-weight:500;font-family:var(--mono);font-size:11.5px;text-align:right;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.d-row>b.wrap{font-family:inherit;font-size:11.5px;max-width:300px;text-align:right;line-height:1.3;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal}
 /* 画质只在详情页切换，列表不再放下拉框 */
-.d-quality{width:96px;flex:none;text-align:right}
-.d-open{color:var(--primary);font-weight:500;font-size:12px;cursor:pointer;letter-spacing:.3px;
-  padding:5px 14px;border-radius:999px;background:var(--accent-dim);
-  border:1px solid transparent;transition:.15s;white-space:nowrap}
+/* 画质下拉：原生 select 在 WebView2 里选项右对齐、样式不可控，改为自定义
+   菜单（文字居中、跟整体同色），展开项也完全可控 */
+.q-drop{position:relative;flex:none;width:74px}
+.q-trigger{width:100%;height:24px;display:flex;align-items:center;justify-content:center;gap:3px;
+  background:var(--surface-c-lowest);border:1px solid var(--outline);border-radius:var(--shape-xs);
+  color:var(--on-surface);font-size:11px;cursor:pointer;padding:0 3px 0 6px}
+.q-trigger:hover{border-color:var(--primary)}
+.q-cur{flex:1;text-align:center;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.q-arrow{width:11px;height:11px;flex:none;opacity:.75;transition:transform .15s}
+.q-drop.open .q-arrow{transform:rotate(180deg)}
+.q-menu{position:absolute;top:calc(100% + 3px);right:0;z-index:40;min-width:80px;
+  background:var(--surface-c-high);border:1px solid var(--outline-variant);border-radius:var(--shape-sm);
+  padding:4px;display:none;flex-direction:column;gap:1px;box-shadow:var(--e3)}
+.q-drop.open .q-menu{display:flex}
+.q-opt{border:0;background:transparent;color:var(--on-surface);font-size:11.5px;
+  padding:5px 8px;border-radius:var(--shape-xs);cursor:pointer;width:100%;text-align:center}
+.q-opt:hover{background:var(--state-hover)}
+.q-opt.on{background:var(--accent-dim);color:var(--primary);font-weight:600}
+.d-open{color:var(--primary);font-weight:500;font-size:11px;cursor:pointer;letter-spacing:.2px;
+  padding:2px 10px;border-radius:999px;background:var(--accent-dim);
+  border:1px solid transparent;transition:.15s;white-space:nowrap;line-height:1.4}
+/* 行内控件统一压到 26px，行高才能全部对齐 34px，不会有的行高 45 有的 32 */
+.d-row .tag{font-size:10px;padding:1px 6px;line-height:1.35}
+.d-row .switch{width:38px;height:22px}
+.d-row .switch i:before{width:12px;height:12px;left:4px}
+.d-row .switch input:checked + i:before{transform:translate(14px,-50%);width:16px;height:16px;left:2px}
+.d-row svg{vertical-align:middle}
 .d-open:hover{border-color:var(--primary);filter:brightness(1.12)}
 .d-open:active{transform:scale(.97)}
+/* 文件名放在半列里：宽度跟上列宽，超长省略，完整名在 title 里 */
 .d-row code{font:11.5px var(--mono);color:var(--on-surface-variant);overflow:hidden;
-  text-overflow:ellipsis;white-space:nowrap;max-width:200px;display:inline-block;vertical-align:middle}
+  text-overflow:ellipsis;white-space:nowrap;max-width:100%;min-width:0;flex:1;
+  display:block;text-align:right}
 /* 移除/保存按钮：紧跟监测开关，不再钉在抽屉底部 */
 /* 操作按钮吸在对话框可视底部：窗口矮的时候也不用滚动就能点到 */
-.d-actions{display:flex;gap:10px;position:sticky;bottom:-18px;z-index:2;
-  background:var(--surface-c-low);border-top:1px solid var(--outline-variant);
-  margin:12px -22px -18px;padding:10px 22px 14px}
+.d-actions{display:flex;gap:8px;position:sticky;bottom:-10px;z-index:2;
+  background:var(--surface-c);border-top:1px solid var(--outline-variant);
+  margin:2px -6px -6px;padding:8px 6px 4px}
+.d-actions .btn{height:32px;font-size:12px;padding:0 10px;gap:6px}
 .d-actions .btn{flex:1;justify-content:center}
 .d-live .room-err{max-width:100%;white-space:normal;margin:6px 0 8px}
+/* 没有错误时不要留下空白：空 div 的 margin 会把按钮下方撑开一大块 */
+.d-live>.room-err:empty{display:none}
 .danger-zone{margin-top:16px;padding-top:14px;border-top:1px solid var(--outline-variant)}
 .detail-status{display:flex;align-items:center;gap:9px;margin-bottom:18px}
 .detail-rows{margin:0 0 16px}
 .detail-row{display:flex;justify-content:space-between;gap:12px;padding:9px 0;
-  border-bottom:1px solid rgba(57,66,75,.5);font-size:12.5px}
+  border-bottom:1px solid var(--outline-variant);font-size:12.5px}
 .detail-row span{color:var(--on-surface-variant);flex:none}
 .detail-row b{font-weight:500;font-family:var(--mono);font-size:12px;text-align:right;word-break:break-all}
 .url-box{display:flex;gap:8px;align-items:center;background:var(--surface-c-lowest);
@@ -462,8 +557,11 @@ tbody tr:first-child .tip-wrap:hover::after{transform:translate(-50%,0)}
 .tip-below::after{top:calc(100% + 8px);bottom:auto;left:auto;right:0;transform:translate(0,-4px)}
 .tip-below:hover::after{transform:translate(0,0)}
 
-/* ---------------- 平台图标 = 活动指示灯 ---------------- */
+/* 平台图标 = 活动指示灯 */
 .plat-ico{display:inline-flex;color:var(--on-surface-variant);line-height:0;transition:color .18s ease}
+/* 单列表格里图标跟着文字基线走会偏高 2~3px：把行盒压平，让图标自身高度决定行高，
+   再由单元格的 vertical-align:middle 垂直居中 */
+.table-wrap:not(.two-col) td:nth-child(2){line-height:0}
 .plat-ico:hover{color:var(--primary)}
 .plat-ico svg{width:16px;height:16px}
 .plat-ico.recording{color:var(--error);animation:blink 1.25s ease-in-out infinite;
@@ -513,13 +611,14 @@ tbody tr:first-child .tip-wrap:hover::after{transform:translate(-50%,0)}
 /* ---------------- 响应式 ---------------- */
 @media(max-width:720px){
   .drawer{padding:14px}
-  .drawer-panel{width:100%;max-height:92vh;border-radius:var(--shape-lg)}
+  /* 窄屏别把对话框撑满：340px 的两列信息刚好，铺满整屏反而更空 */
+  .drawer-panel{width:min(340px,94vw);max-height:92vh;border-radius:var(--shape-lg)}
   .drawer-foot{flex-direction:column}
 }
 /* 侧栏（状态 + 日志）保持右侧竖栏，只做横向折叠；
    窄窗口下表格隐藏「画质 / 已录制时长」两列（详情抽屉里仍可看可改），避免横向截断 */
 @media(max-width:1080px){
-  .grid{grid-template-columns:minmax(0,1fr) 280px}
+  /* 侧栏已改成浮层覆盖，这里不能再给 grid 留列，否则列表被压窄、双列排不出来 */
   .log-panel{min-width:0}
   table{min-width:0}
   .q-col{display:none}
@@ -536,8 +635,15 @@ tbody tr:first-child .tip-wrap:hover::after{transform:translate(-50%,0)}
   .stats{grid-template-columns:1fr 1fr}
   .panel-head{flex-direction:column;align-items:stretch}
   .panel-actions{width:100%}
-  table{min-width:560px}
-  th,td{padding:9px 10px}
+  /* 窄窗口下原来写死 min-width:560px，比容器还宽，右侧操作图标被挤出视口。
+     改为定宽列 + 名字列自适应省略，窗口再窄也不横向滚动。
+     只作用于单列表格：双列是卡片网格，定宽会把它压扁。 */
+  .table-wrap:not(.two-col) table{min-width:0;table-layout:fixed}
+  .table-wrap:not(.two-col) th,.table-wrap:not(.two-col) td{padding:8px}
+  .table-wrap:not(.two-col) th:nth-child(1),.table-wrap:not(.two-col) td:nth-child(1){width:70px}
+  .table-wrap:not(.two-col) th:nth-child(2),.table-wrap:not(.two-col) td:nth-child(2){width:42px}
+  .table-wrap:not(.two-col) th:nth-child(5),.table-wrap:not(.two-col) td:nth-child(5){width:118px}
+  .table-wrap:not(.two-col) td:nth-child(3){overflow:hidden;text-overflow:ellipsis}
   .room-url,.room-err{max-width:210px}
   .statusbar{flex-wrap:wrap;height:auto;padding:8px 0;gap:8px}
 }
@@ -563,38 +669,60 @@ tbody tr:first-child .tip-wrap:hover::after{transform:translate(-50%,0)}
 /* 双列：两列紧凑卡片，单行布局，行高贴近单列；DOM 与行内事件不变 */
 .table-wrap.two-col table{display:block;min-width:0;width:100%}
 .table-wrap.two-col thead{display:none}
-.table-wrap.two-col tbody{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
-  gap:6px 10px;padding:8px 2px 14px;align-content:start}
+.table-wrap.two-col tbody{display:grid;
+  /* 严格两列：用 auto-fit + 最小宽度会在宽窗口下自动变成三列/四列，每列被压到 170px，
+     名字全成省略号。这里固定 2 列，只有极窄时才降级单列。 */
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:6px 8px;padding:8px 2px 14px;align-content:start}
+/* 行高对齐单列的 51px：内容 23 + padding 上下 + 边框 */
 .table-wrap.two-col tbody tr{display:grid;
-  grid-template-columns:auto auto minmax(0,1fr) auto auto;
-  grid-template-areas:"status plat name dur actions";
-  gap:8px;align-items:center;min-width:0;min-height:42px;
+  /* 名字列下限设为 0：卡片太窄时宁可省略号，也不能溢出压住右侧操作图标 */
+  grid-template-columns:auto auto minmax(0,1fr) auto;
+  grid-template-areas:"status plat name actions";
+  gap:4px;align-items:center;min-width:0;height:51px;
   background:var(--surface-c-lowest);border:1px solid var(--outline-variant);
-  border-radius:var(--shape-sm);padding:5px 10px}
+  border-radius:var(--shape-sm);padding:4px 7px;
+  /* 上千个房间时只渲染可视区附近的卡片，否则切换双列会整页卡死 */
+  content-visibility:auto;contain-intrinsic-size:auto 51px}
 .table-wrap.two-col tbody tr:hover{background:var(--surface-c);border-color:var(--outline)}
 .table-wrap.two-col td{padding:0;border:0;min-width:0;white-space:nowrap}
-/* 窄窗口响应式会隐藏「已录制时长」，双列卡片竖排不受影响 */
-.table-wrap.two-col td.q-col{display:block;text-align:right}
+/* 双列不显示「已录制时长」，把横向空间全让给主播名（时长在详情里看） */
+.table-wrap.two-col td.q-col{display:none}
 .table-wrap.two-col td:nth-child(1){grid-area:status}
 .table-wrap.two-col td:nth-child(2){grid-area:plat}
-.table-wrap.two-col td:nth-child(3){grid-area:name;min-width:0}
-.table-wrap.two-col td:nth-child(4){grid-area:dur}
-.table-wrap.two-col td:nth-child(5){grid-area:actions;justify-self:end}
-.table-wrap.two-col .room-name{overflow:hidden;min-width:0}
-.table-wrap.two-col .room-name .nm{display:block;font-size:13px;font-weight:500;
-  overflow:hidden;text-overflow:clip;white-space:nowrap}
-.table-wrap.two-col .nm-txt{display:inline-block;white-space:nowrap}
-/* 只有名字真的放不下才左右往返滚动；hover 暂停，方便点开详情 */
-.table-wrap.two-col .nm.nm-overflow .nm-txt{animation:nmSlide 7s ease-in-out infinite alternate}
-.table-wrap.two-col .nm.nm-overflow:hover .nm-txt{animation-play-state:paused}
+.table-wrap.two-col td:nth-child(3){grid-area:name;min-width:0;overflow:hidden}
+.table-wrap.two-col td:nth-child(5){grid-area:actions;justify-self:end;padding-left:6px}
+.table-wrap.two-col .room-name{overflow:hidden;min-width:0;width:100%;max-width:100%}
+.table-wrap.two-col .room-name .nm{display:block;width:100%;max-width:100%;font-size:13px;font-weight:500;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.table-wrap.two-col .nm-txt{display:inline-block;max-width:100%;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+/* 只有鼠标停在某个名字上时才滚这一个，避免上千个动画同时跑 */
+.table-wrap.two-col .nm.nm-overflow:hover .nm-txt{max-width:none;
+  animation:nmSlide 6s ease-in-out infinite alternate}
 @keyframes nmSlide{
   0%,18%{transform:translateX(0)}
   82%,100%{transform:translateX(calc(-1 * var(--nm-shift,0px)))}
 }
-.table-wrap.two-col .row-actions{gap:2px}
-.table-wrap.two-col .tag{font-size:11px;padding:3px 7px}
+/* 三个操作图标：贴右整齐排列，组内不留缝，靠图标自身的可点区域撑开间距 */
+.table-wrap.two-col .row-actions{gap:0;padding-left:3px}
+.table-wrap.two-col .icon-act{width:24px;height:24px;padding:4px;border-radius:var(--shape-xs)}
+.table-wrap.two-col .icon-act::before{inset:-2px}
+.table-wrap.two-col .icon-act svg{width:14px;height:14px}
+.table-wrap.two-col .plat-ico svg{width:14px;height:14px}
+/* 平台图标用 flex 垂直居中：inline-flex 会跟着文字基线走，实测比卡片中心高 2px，
+   和状态标签、主播名、操作图标对不齐 */
+.table-wrap.two-col td:nth-child(2){display:flex;align-items:center;justify-content:center}
+.table-wrap.two-col td:nth-child(1){display:flex;align-items:center}
+.table-wrap.two-col .tag{font-size:10.5px;padding:3px 6px;line-height:1.15;letter-spacing:0}
+/* 卡片启用了 content-visibility:auto（绘制裁剪），自绘气泡会被切成一条残影，
+   双列下一律用原生 title 提示，视觉更干净 */
+.table-wrap.two-col .tip-wrap::after{display:none}
 .table-wrap.two-col .empty{inset:0}
-@media (max-width:640px){.table-wrap.two-col tbody{grid-template-columns:minmax(0,1fr)}}
+/* 极窄时降级单列，避免两列各自挤成一条 */
+@media(max-width:430px){
+  .table-wrap.two-col tbody{grid-template-columns:minmax(0,1fr)}
+}
 
 /* ============================================================
    MD3 refinement layer

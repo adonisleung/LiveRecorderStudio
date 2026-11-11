@@ -82,14 +82,6 @@ const ICON = {
 /* ---------- 列表 ---------- */
 /* 双列卡片里名字放不下时左右往返滚动；单列仍用省略号。
    整表重建 / 布局切换 / 窗口变化后都要重新量一次实际宽度。 */
-function markOverflowNames() {
-  if (!$('.table-wrap').classList.contains('two-col')) return;
-  for (const el of $('#roomRows').querySelectorAll('.nm-click')) {
-    const shift = el.scrollWidth - el.clientWidth;
-    el.classList.toggle('nm-overflow', shift > 4);
-    el.style.setProperty('--nm-shift', Math.max(0, shift) + 'px');
-  }
-}
 
 function roomRow(r) {
   const st = r.status || 'idle';
@@ -102,7 +94,7 @@ function roomRow(r) {
   return `<tr data-id="${r.id}" class="${st}">
     <td><span class="tag ${waiting ? 'wait' : st}" title="${waiting ? `${plat}限流静默中，约 ${Math.ceil(blocked / 60)} 分钟后重试` : ''}">${waiting ? '限流等待' : (STATUS[st] || st)}</span></td>
     <td><span class="tip-wrap plat-ico ${st}" data-tip="${esc(plat)}${st === 'recording' ? ' · 正在录制' : st === 'live' ? ' · 直播中' : ''}">${ICON[plat] || ICON['自定义']}</span></td>
-    <td><div class="room-name"><span class="nm nm-click" data-act="detail" title="点击查看直播间详情"><span class="nm-txt">${esc(nameOf(r))}</span></span></div>${sub}</td>
+    <td><div class="room-name"><span class="nm nm-click" data-act="detail" title="${esc(nameOf(r))} · 点击查看详情"><span class="nm-txt">${esc(nameOf(r))}</span></span></div>${sub}</td>
     <td class="q-col"><span class="mono dur" data-dur="${r.id}">${durText(r.rec_seconds)}</span></td>
     <td><div class="row-actions">
       <button class="icon-act tip-wrap" data-act="folder" data-tip="打开文件夹">${ICON.folder}</button>
@@ -122,17 +114,25 @@ function render(s) {
   // 「checking」是扫描瞬态（几百个房间轮流翻转），也排除掉，避免无意义重建。
   const sig = JSON.stringify(rooms.map(r =>
     [r.id, r.status === 'checking' ? '' : r.status, r.enabled, r.quality,
-     r.display_name, r.note, r.error, r.anchor])) + '|' + s.running;
+     r.display_name, r.note, r.error, r.anchor]));
   if (sig !== lastRoomSig) pendingRebuild = true;
   // 悬停在表格上时不重建（否则行会从鼠标底下跳走，点不中）；
   // 非悬停时也最多 1.2 秒重建一次，压掉扫描期的高频重建。
-  if (pendingRebuild && !hoverPause && Date.now() - lastRebuild >= 1200) {
+  // 双列卡片的重排成本远高于表格行，重建间隔放宽一倍
+  const rebuildGap = $('.table-wrap').classList.contains('two-col') ? 4000 : 1200;
+  if (pendingRebuild && !hoverPause && Date.now() - lastRebuild >= rebuildGap) {
     lastRoomSig = sig;
     pendingRebuild = false;
     lastRebuild = Date.now();
-    $('#roomRows').innerHTML = rooms.map(roomRow).join('');
-    markOverflowNames();
-    $('#empty').classList.toggle('hidden', (s.rooms || []).length > 0);
+    const html = rooms.map(roomRow).join('');
+    // 上千行时 innerHTML 解析要占掉半秒，挪到浏览器空闲期做，别打断点击与滚动
+    const apply = () => {
+      $('#roomRows').innerHTML = html;
+      syncTips();
+      $('#empty').classList.toggle('hidden', (s.rooms || []).length > 0);
+    };
+    if (window.requestIdleCallback) requestIdleCallback(apply, { timeout: 800 });
+    else apply();
     const onAir = (s.rooms || []).filter(r => r.status === 'recording' || r.status === 'live').length;
     $('#roomsHint').textContent =
       `${s.stats.total} 个房间 · ${s.stats.enabled} 个启用${onAir ? ` · ${onAir} 个在播` : ''} · 在播优先排序`;
@@ -260,9 +260,13 @@ function folderPicker(startPath, onPick) {
   load(startPath || '');
 }
 
-/* ---------- 二次确认 ---------- */function confirmDialog({title, text, okText = '确认', danger = true, onOk}) {
+/* ---------- 二次确认 ---------- */
+function confirmDialog({title, text, okText = '确认', danger = true, onOk}) {
   const foot = $('#modalFoot');
-  foot.innerHTML = `<button class="btn ghost" data-close="1">取消</button>
+  // 取消在左、危险操作独立在右下角：和关闭窗口弹窗一致，主操作不要和取消挤在一起
+  foot.innerHTML = `<div class="foot-left">
+      <button class="btn ghost" data-close="1">取消</button>
+    </div>
     <button class="btn ${danger ? 'danger' : 'primary'}" id="confirmOk">${esc(okText)}</button>`;
   $('#modalTitle').textContent = title;
   $('#modalBody').innerHTML = `<p class="confirm-text">${text}</p>`;
@@ -284,7 +288,6 @@ function openDrawer(id) {
   const r = findRoom(id);
   if (!r) return;
   $('#drawerTitle').textContent = nameOf(r);
-  $('#drawerSub').textContent = `${platformOf(r)}直播间${roomNo(r.url) ? ' · ' + roomNo(r.url) : ''}`;
   $('#drawerBody').innerHTML = drawerHtml(r);
   $('#drawerFoot').innerHTML = '';   // 操作按钮已内联到监测开关下方
   $('#drawer').classList.remove('hidden');
@@ -302,7 +305,6 @@ function drawerHtml(r) {
     <label class="d-label">显示名称</label>
     <input class="input" id="dAlias" maxlength="40" value="${esc(aliasShown)}"
            data-origin="${esc(aliasShown)}" placeholder="留空则使用解析到的昵称">
-    <p class="hint">这里同步显示当前名字。改动并保存后以你填的为准（列表、录制目录和文件名都优先用它）；不改动则继续跟随抖音昵称，主播改名会自动更新。</p>
   </div>
   <div class="d-section">
     <label class="d-label">备注</label>
@@ -313,27 +315,33 @@ function drawerHtml(r) {
     <div class="d-live">
       <div class="d-row"><span>主播名称</span><b>${esc(r.anchor || '—')}</b></div>
       <div class="d-row"><span>在线人数</span><b id="dViewers">${viewersText(r.viewers)}</b></div>
-      <div class="d-row"><span>直播标题</span><b class="wrap" id="dTitle">${esc(r.title || '—')}</b></div>
-      <div class="d-row"><span>直播链接</span>
+      <div class="d-row span2"><span>直播标题</span><b class="wrap" id="dTitle">${esc(r.title || '—')}</b></div>
+      <div class="d-row span2"><span>直播链接</span>
         <a id="dOpenLive" class="d-open" title="点击用浏览器打开直播链接">打开直播间</a></div>
       <div class="d-row"><span>录制格式</span><b>${esc(String(cfg.format || 'ts').toUpperCase())}</b></div>
       <div class="d-row"><span>录制画质</span>
-        <select class="mini d-quality" id="dQuality" title="切换该房间的录制画质">
-          ${['原画','超清','高清','标清','流畅'].map(q => `<option ${(r.quality||'原画')===q?'selected':''}>${q}</option>`).join('')}
-        </select></div>
-      <div class="d-row"><span>使用代理</span><b>${cfg.proxy ? esc(cfg.proxy) : '否'}</b></div>
+        <div class="q-drop" id="dQuality" data-val="${esc(r.quality || '原画')}" title="切换该房间的录制画质">
+          <button type="button" class="q-trigger">
+            <span class="q-cur">${esc(r.quality || '原画')}</span>
+            <svg class="q-arrow" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <div class="q-menu">
+            ${['原画','超清','高清','标清','流畅'].map(q => `<button type="button" class="q-opt${(r.quality||'原画')===q?' on':''}" data-v="${q}">${q}</button>`).join('')}
+          </div>
+        </div></div>
       <div class="d-row"><span>本次录制时长</span><b id="dDur">${durText(r.rec_seconds)}</b></div>
       <div class="d-row"><span>已录大小</span><b id="dSize">${sizeText(r.rec_bytes) || '—'}</b></div>
-      <div class="d-row"><span>最近录像</span><code title="${esc(r.file)}">${esc(file || '—')}</code></div>
-      <div class="d-row"><span>最近检查</span><b id="dCheck">${ago(r.last_check)}</b></div>
+      <div class="d-row"><span>使用代理</span><b>${cfg.proxy ? esc(cfg.proxy) : '否'}</b></div>
       <div class="d-row"><span>监控状态</span><b id="dStatus" class="tag ${r.status}">${STATUS[r.status] || r.status}</b></div>
-      <div class="d-row"><span>监测开关</span>
+      <div class="d-row"><span>最近检查</span><b id="dCheck">${ago(r.last_check)}</b></div>
+      <div class="d-row"><span>最近录像</span><code title="${esc(r.file)}">${esc(file || '—')}</code></div>
+      <div class="d-row span2"><span>监测开关</span>
         <label class="switch" title="停用后不再检测该房间"><input type="checkbox" id="dEnabled" ${r.enabled ? 'checked' : ''}><i></i></label></div>
-      <div class="d-actions">
+      <div class="d-actions span2">
         <button class="btn ghost danger-text" id="dRemove">移除此直播间</button>
         <button class="btn primary" id="dSave">保存修改</button>
       </div>
-      <div id="dError" class="room-err">${r.error ? esc(r.error) : ''}</div>
+      <div id="dError" class="room-err span2">${r.error ? esc(r.error) : ''}</div>
     </div>
   </div>`;
 }
@@ -509,10 +517,31 @@ function bindDrawer(r) {
     toast(e.target.checked ? '已启用该房间' : '已停用，不再检测');
     lastRoomSig = ''; refresh();
   };
-  $('#dQuality').onchange = async (e) => {
-    await api('/api/rooms/' + r.id, {method:'PATCH', body:JSON.stringify({quality: e.target.value})});
-    toast('画质已设为 ' + e.target.value); lastRoomSig = ''; refresh();
-  };
+  // 自定义画质下拉：原生 select 在 WebView2 里选项右对齐、样式不可控
+  (function bindQualityDrop() {
+    const drop = $('#dQuality');
+    const cur = drop.querySelector('.q-cur');
+    drop.querySelector('.q-trigger').onclick = (e) => {
+      e.stopPropagation();
+      drop.classList.toggle('open');
+    };
+    for (const opt of drop.querySelectorAll('.q-opt')) {
+      opt.onclick = async () => {
+        const v = opt.dataset.v;
+        drop.classList.remove('open');
+        cur.textContent = v;
+        drop.dataset.val = v;
+        for (const o of drop.querySelectorAll('.q-opt')) o.classList.toggle('on', o.dataset.v === v);
+        await api('/api/rooms/' + r.id, {method:'PATCH', body:JSON.stringify({quality: v})});
+        toast('画质已切换为' + v);
+      };
+    }
+    // 点下拉以外收起
+    document.addEventListener('click', function onDoc(e) {
+      if (!document.body.contains(drop)) return;
+      if (!drop.contains(e.target)) drop.classList.remove('open');
+    });
+  })();
   $('#dSave').onclick = async () => {
     const val = $('#dAlias').value.trim();
     const origin = $('#dAlias').dataset.origin || '';
@@ -562,23 +591,34 @@ $('#btnEngine').onclick = async () => {
   const running = $('#btnEngine').classList.contains('running');
   await post('/api/engine', {action: running ? 'stop' : 'start'});
   toast(running ? '监测已停止' : '监测已启动');
-  lastRoomSig = ''; refresh();
+  // 不再强制重建整表：上千行时点一下会卡住。按钮与统计由 refresh 就地更新，
+  // 表格内容的下一次变化交给签名比对处理。
+  refresh();
 };
 $('#btnFolder').onclick = async () => { try { await post('/api/open-folder'); } catch (e) { toast(e.message); } };
 $('#btnClearLog').onclick = () => { lastLogSig = 'reset'; $('#logs').innerHTML = ''; };
 /* 单列 / 双列布局切换：状态存本地，下次打开保持。
    纯 CSS 重排表格行，切完不需要重建表格，也不会打断画质下拉框。 */
 let twoCol = localStorage.getItem('lrs.twocol') === '1';
+/* 双列卡片有绘制裁剪，自绘气泡会变残影：切到双列改用原生 title，
+   切回单列恢复自绘气泡，两种模式都不丢提示 */
+function syncTips() {
+  const on = twoCol;
+  for (const el of $('#roomRows').querySelectorAll('[data-tip]')) {
+    if (on) { if (el.title !== el.dataset.tip) el.title = el.dataset.tip; }
+    else if (el.hasAttribute('title')) el.removeAttribute('title');
+  }
+}
+
 function applyLayout() {
   $('.table-wrap').classList.toggle('two-col', twoCol);
   $('#btnLayoutText').textContent = twoCol ? '单列' : '双列';
   $('#btnLayout').dataset.tip = twoCol ? '切换为单列布局' : '切换为双列布局';
   $('#btnLayout').classList.toggle('active', twoCol);
   localStorage.setItem('lrs.twocol', twoCol ? '1' : '0');
-  markOverflowNames();
+  syncTips();
 }
 $('#btnLayout').onclick = () => { twoCol = !twoCol; applyLayout(); };
-window.addEventListener('resize', markOverflowNames);
 applyLayout();
 
 /* 右侧状态/日志栏折叠：状态存本地，下次打开保持 */
@@ -589,8 +629,16 @@ function applySide() {
   $('#btnSide').dataset.tip = sideHidden ? '展开侧栏' : '收起侧栏';
   $('#btnSide').classList.toggle('active', !sideHidden);
   localStorage.setItem('lrs.side2', sideHidden ? '1' : '0');
+  // 窄窗口下顶栏会折成两行，侧栏起点必须跟着顶栏实际高度走，否则会盖住「启动监测」
+  const tb = document.querySelector('.topbar');
+  if (tb) {
+    const h = Math.round(tb.getBoundingClientRect().bottom);
+    document.documentElement.style.setProperty('--side-top', (h > 24 ? h : 72) + 'px');
+  }
 }
 $('#btnSide').onclick = () => { sideHidden = !sideHidden; applySide(); };
+// 窗口尺寸变化会改变顶栏行数（72px ↔ 折行），侧栏起点要跟着重算
+window.addEventListener('resize', () => { if (!sideHidden) applySide(); });
 applySide();
 
 /* 主题：浅色 / 深色，存本地记忆。默认深色，保持原有观感，不擅自换掉用户的默认外观 */
@@ -672,9 +720,13 @@ window.onHostClose = () => {
     缩到托盘：继续在后台监测与录制，点托盘图标或按 <b>${esc(showKey)}</b> 叫回窗口。<br>
     退出程序：先收尾正在录制的文件再关闭，之后需要重新启动。</p>`;
   $('#modalFoot').innerHTML = `
-    <button class="btn ghost" data-close="1">取消</button>
-    <button class="btn" id="closeTray">缩到托盘</button>
+    <div class="foot-left">
+      <button class="btn ghost" data-close="1">取消</button>
+      <button class="btn" id="closeTray">缩到托盘</button>
+    </div>
     <button class="btn danger" id="closeQuit">退出程序</button>`;
+  // 点弹窗外空白就能关掉，右上角 × 就不要了
+  document.querySelector('.modal-card').classList.add('hide-close');
   $('#modal').classList.remove('hidden');
   $('#closeTray').onclick = async () => {
     $('#modal').classList.add('hidden');
@@ -740,10 +792,15 @@ function confirmRemove(id) {
 
 /* ---------- 弹窗（导入 / 设置 / 确认） ---------- */
 let modalSubmit = null;
-function openModal(title, bodyHtml, okText, onSubmit) {
+function openModal(title, bodyHtml, okText, onSubmit, footExtra = '') {
+  // 每次打开先清掉上一次可能留下的弹窗样式标记，避免串到别的弹窗
+  const card = document.querySelector('.modal-card');
+  if (card) card.classList.remove('narrow', 'hide-close');
   $('#modalTitle').textContent = title;
   $('#modalBody').innerHTML = bodyHtml;
-  $('#modalFoot').innerHTML = `<button class="btn ghost" data-close="1">取消</button>
+  // footExtra 放在底栏左侧，和取消/导入同一行，不再另行占一行
+  $('#modalFoot').innerHTML = `${footExtra ? `<div class="foot-left">${footExtra}</div>` : ''}
+    <button class="btn ghost" data-close="1">取消</button>
     <button class="btn primary" id="modalOk">${esc(okText)}</button>`;
   modalSubmit = onSubmit;
   $('#modal').classList.remove('hidden');
@@ -756,11 +813,7 @@ $('#modal').addEventListener('click', (e) => {
 $('#btnImport').onclick = () => {
   openModal('导入', `
   <textarea id="importText" placeholder="支持批量导入&#10;一行一个直播间地址，例如：&#10;https://live.douyin.com/745964462470&#10;https://live.kuaishou.com/u/sunni777&#10;demo://离线演示"></textarea>
-  <div class="import-bar">
-    <button class="btn small tonal" id="btnPasteIn">粘贴</button>
-    <button class="btn small ghost" id="btnExport">导出列表</button>
-  </div>
-  <p class="hint">支持平台：<b>抖音</b>（live.douyin.com）、<b>快手</b>（live.kuaishou.com/u/…）、<b>小红书</b>（xiaohongshu.com/livestream/…）、<code>.m3u8</code> / <code>.flv</code> 直链、<code>demo://名称</code> 离线演示。<br><b>只识别每行里的地址</b>：同一行带的主播名、备注、画质都会被忽略 —— 主播名一律靠平台解析，备注和显示名称在详情里自己填。行首加 # 可注释；重复地址自动跳过；新导入的房间会立即检测。</p>`,
+`,
   '导入', async () => {
     const text = $('#importText').value;
     if (!text.trim()) return closeModal();
@@ -771,7 +824,11 @@ $('#btnImport').onclick = () => {
     if (r.ignored) bits.push(`无地址 ${r.ignored} 行`);
     toast(bits.join(' · '));
     lastRoomSig = ''; refresh();
-  });
+  },
+  `<button class="btn small tonal" id="btnPasteIn">粘贴</button>
+   <button class="btn small ghost" id="btnExport">导出列表</button>`);
+  // 导入弹窗内容少，用窄版：420px 宽、输入框 150px 高，不留大片空白
+  document.querySelector('.modal-card').classList.add('narrow');
   bindImportExport();
 };
 
@@ -886,24 +943,23 @@ $('#btnSettings').onclick = async () => {
   const s = await api('/api/state');
   const c = s.config;
   openModal('设置', `
-    <div class="field-row">
-      <div class="field"><label>循环间隔（秒）</label><input class="input" id="cInterval" type="number" min="10" value="${esc(c.interval)}"></div>
-      <div class="field"><label>并发检查数</label><input class="input" id="cConcurrency" type="number" min="1" max="64" value="${esc(c.concurrency)}"></div>
-    </div>
-    <div class="field-row">
-      <div class="field"><label>分段录制（分钟，0 = 不分段）</label>
-        <input class="input" id="cSegment" type="number" min="0" max="720" step="5" value="${esc(c.segment_minutes ?? 0)}"></div>
-      <div class="field"><label>错峰比例（0 关闭）</label><input class="input" id="cJitter" type="number" min="0" max="20" value="${esc(c.jitter_ratio)}"></div>
+    <div class="field-row two-col">
+      <div class="field"><label>默认录制画质</label>
+        <select class="input" id="cQuality">
+          ${['原画','超清','高清','标清','流畅'].map(q =>
+            `<option ${(c.quality || '原画')===q?'selected':''}>${q}</option>`).join('')}
+        </select></div>
       <div class="field"><label>录制格式</label><select class="input" id="cFormat">
         ${['ts','mkv','mp4'].map(f => `<option ${c.format===f?'selected':''}>${f}</option>`).join('')}</select></div>
     </div>
-    <div class="field">
-      <label>默认录制画质（新导入的房间使用）</label>
-      <select class="input" id="cQuality">
-        ${['原画','超清','高清','标清','流畅'].map(q =>
-          `<option ${(c.quality || '原画')===q?'selected':''}>${q}</option>`).join('')}
-      </select>
-      <p class="hint">每个房间的画质可在详情里单独覆盖；抖音「原画」即最高档，遇到仅 App 端可播的房间会自动降级。</p>
+    <div class="field-row two-col">
+      <div class="field"><label>循环间隔（秒）</label><input class="input" id="cInterval" type="number" min="10" value="${esc(c.interval)}"></div>
+      <div class="field"><label>并发检查数</label><input class="input" id="cConcurrency" type="number" min="1" max="64" value="${esc(c.concurrency)}"></div>
+    </div>
+    <div class="field-row two-col">
+      <div class="field"><label>分段录制（分钟，0 = 不分段）</label>
+        <input class="input" id="cSegment" type="number" min="0" max="720" step="5" value="${esc(c.segment_minutes ?? 0)}"></div>
+      <div class="field"><label>错峰比例（0 关闭）</label><input class="input" id="cJitter" type="number" min="0" max="20" value="${esc(c.jitter_ratio)}"></div>
     </div>
     <div class="field">
       <label>保存位置</label>
@@ -912,36 +968,40 @@ $('#btnSettings').onclick = async () => {
         <button class="btn small" id="cBrowse">浏览…</button>
         <button class="btn small ghost" id="cOpenDir">打开</button>
       </div>
-      <p class="hint" id="cSaveHint">当前位置：<code>${esc(s.save_path || '')}</code><br>可填任意绝对路径（含其他盘符 / 网络路径），也可用相对程序目录的写法。</p>
+      <p class="hint" id="cSaveHint">当前位置：<code>${esc(s.save_path || '')}</code></p>
     </div>
     <div class="field">
       <label>快捷键</label>
-      <div class="field-row">
+      <div class="field-row two-col">
         <div class="key-box"><span class="key-label">隐藏窗口</span>
           <input class="input keycap" id="cKeyHide" readonly value="${esc(c.hotkey_hide || 'Alt+F1')}"></div>
         <div class="key-box"><span class="key-label">还原窗口</span>
           <input class="input keycap" id="cKeyShow" readonly value="${esc(c.hotkey_show || 'Alt+F2')}"></div>
       </div>
-      <p class="hint">点进输入框后直接按组合键录入（支持 Ctrl / Alt / Shift / Win + 任意键，如 Alt+F1）。录入期间全局热键临时停用，录完自动恢复。若组合已被系统占用，会自动换成备用键并在保存后提示。</p>
+      <p class="hint">点进输入框后直接按组合键录入（Ctrl / Alt / Shift / Win + 任意键）。录入期间全局热键临时停用，录完自动恢复。</p>
     </div>
-    <div class="field-row">
-      <div class="field"><label>代理地址（如 127.0.0.1:7890，留空见右侧开关）</label>
-        <input class="input" id="cProxy" value="${esc(c.proxy)}"></div>
-      <div class="field"><label>未填代理时</label>
-        <label class="check" style="padding-top:9px"><input type="checkbox" id="cSysProxy" ${c.follow_system_proxy !== false ? 'checked' : ''}>
-        跟随系统代理</label></div>
+    <div class="field">
+      <label>代理地址（如 127.0.0.1:7890）</label>
+      <div class="proxy-row">
+        <input class="input" id="cProxy" value="${esc(c.proxy)}">
+        <label class="check"><input type="checkbox" id="cSysProxy" ${c.follow_system_proxy !== false ? 'checked' : ''}>
+          未填时跟随系统代理</label>
+      </div>
     </div>
-    <div class="field"><label>Cookie（可选，抖音风控时填写）</label><textarea id="cCookie" style="height:70px">${esc(c.cookie)}</textarea></div>
+    <div class="field"><label>Cookie（可选，抖音风控时填写）</label><textarea id="cCookie">${esc(c.cookie)}</textarea></div>
     <div class="field-row check-row">
       <label class="check"><input type="checkbox" id="cAutoMp4" ${c.auto_mp4 ? 'checked' : ''}> 录制结束自动转 MP4</label>
       <label class="check"><input type="checkbox" id="cKeepTs" ${c.keep_ts ? 'checked' : ''}> 转换后保留原始 .ts</label>
     </div>
-    <p class="hint">错峰比例 = 循环间隔 ÷ N，每轮在此范围内随机抖动；平均间隔不变，避免上千房间同时请求。<br>
-      分段录制：每满 N 分钟自动切成一个新文件（填 30 就是 30 分钟一段），断流或崩溃时最多只丢当前这一段。</p>
-    <p class="hint">${s.hotkey_hide
-      ? `按 <b>${esc(s.hotkey_hide)}</b> 隐藏窗口（不留托盘图标），按 <b>${esc(s.hotkey_show || '—')}</b> 还原。隐藏与录制互不影响。`
-      : (s.hotkey_tray ? '隐藏快捷键被其他软件占用，已启用托盘图标：点一下还原窗口。'
-                       : '')}</p>
+    <div class="d-section danger-zone">
+      <label class="d-label">移除直播间（按名称，支持正则）</label>
+      <div class="remove-re">
+        <input class="input" id="cRemoveRe" placeholder="例如：账号已注销 或 ^已注销|^已封禁$">
+        <button class="btn small ghost danger-text" id="cRemoveGo">移除</button>
+      </div>
+      <p class="remove-re-count" id="cRemoveCount"></p>
+      <p class="hint">按主播显示名匹配；支持正则（区分大小写由正则本身决定，不区分可用 (?i)）。只会移除监测项，已录制的文件不受影响。</p>
+    </div>
     <div class="d-section danger-zone">
       <label class="d-label">危险操作</label>
       <button class="btn small ghost danger-text" id="cClearRooms">清空直播间列表</button>
@@ -1003,6 +1063,42 @@ $('#btnSettings').onclick = async () => {
     try { await post('/api/open-folder'); } catch (e) { toast(e.message); }
   };
   ['#cKeyHide', '#cKeyShow'].forEach(sel => bindHotkeyInput($(sel)));
+  // 设置弹窗收窄 + 去掉右上角 ×
+  document.querySelector('.modal-card').classList.add('settings');
+  // 按名称/正则移除：输入时实时预览匹配数，点移除弹一次确认批量删除
+  const countEl = $('#cRemoveCount');
+  const refreshRemoveCount = () => {
+    const pat = $('#cRemoveRe').value.trim();
+    if (!pat) { countEl.innerHTML = ''; return; }
+    let re;
+    try { re = new RegExp(pat); }
+    catch (e) { countEl.innerHTML = `<span class="warn">正则无效：${esc(e.message)}</span>`; return; }
+    const names = (lastState?.rooms || []).map(nameOf);
+    const n = names.filter(n => re.test(n)).length;
+    countEl.innerHTML = n > 0
+      ? `匹配 <b>${n}</b> 个直播间，点「移除」将批量删除。`
+      : '没有匹配到任何直播间。';
+  };
+  $('#cRemoveRe').addEventListener('input', refreshRemoveCount);
+  $('#cRemoveGo').onclick = () => {
+    const pat = $('#cRemoveRe').value.trim();
+    if (!pat) { toast('先输入要匹配的名称或正则'); return; }
+    let re;
+    try { re = new RegExp(pat); }
+    catch (e) { toast('正则无效：' + e.message); return; }
+    const ids = (lastState?.rooms || []).filter(r => re.test(nameOf(r))).map(r => r.id);
+    if (!ids.length) { toast('没有匹配到任何直播间'); return; }
+    confirmDialog({
+      title: '移除直播间',
+      text: `按「<b>${esc(pat)}</b>」匹配到 <b>${ids.length}</b> 个直播间，将全部移除。<br><span class="muted">只会移除监测项，已录制的文件不受影响。此操作不可撤销。</span>`,
+      okText: `移除 ${ids.length} 个`,
+      onOk: async () => {
+        const r = await post('/api/rooms/remove-matching', {pattern: pat});
+        closeModal(); toast(`已移除 ${r.removed} 个直播间`);
+        lastRoomSig = ''; refresh();
+      }
+    });
+  };
   $('#cClearRooms').onclick = () => confirmDialog({
     title: '清空直播间列表',
     text: '将移除<b>全部</b>直播间，已录制的文件不受影响。<br><span class="muted">此操作不可撤销。</span>',
@@ -1075,3 +1171,25 @@ else if (location.hash === '#settings') $('#btnSettings').click();
     if (el) flash(el);
   }, true);
 })();
+
+/* 双列长名字滚动：只对「鼠标停留」的那一个算位移。
+   全量遍历读 scrollWidth 会触发上千张卡片重排（实测 1.3s），正是双列卡死的根因。 */
+function markOverflowName(el) {
+  if (!el || el.dataset.mx === '1') return;
+  el.dataset.mx = '1';
+  // 文字块自身带 max-width:100% 用于省略号，所以溢出量要量内层文字的 scrollWidth
+  const txt = el.querySelector('.nm-txt') || el;
+  const shift = txt.scrollWidth - txt.clientWidth;
+  if (shift > 4) {
+    el.classList.add('nm-overflow');
+    el.style.setProperty('--nm-shift', shift + 'px');
+  }
+}
+let nameHoverTimer;
+$('#roomRows').addEventListener('mouseover', (e) => {
+  const nm = e.target.closest && e.target.closest('.nm-click');
+  if (!nm || !$('.table-wrap').classList.contains('two-col')) return;
+  clearTimeout(nameHoverTimer);
+  // 停留 140ms 才测：快速扫过列表时不触发任何布局
+  nameHoverTimer = setTimeout(() => markOverflowName(nm), 140);
+});
