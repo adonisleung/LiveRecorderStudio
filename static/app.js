@@ -262,8 +262,11 @@ function folderPicker(startPath, onPick) {
 
 /* ---------- 二次确认 ---------- */
 function confirmDialog({title, text, okText = '确认', danger = true, onOk}) {
+  const card = $('#modal .modal-card');
+  card.classList.remove('narrow', 'settings', 'hide-close');
+  card.classList.add('confirm');
   const foot = $('#modalFoot');
-  // 取消在左、危险操作独立在右下角：和关闭窗口弹窗一致，主操作不要和取消挤在一起
+  // 取消在左、确认在右下角，两端分开
   foot.innerHTML = `<div class="foot-left">
       <button class="btn ghost" data-close="1">取消</button>
     </div>
@@ -272,11 +275,17 @@ function confirmDialog({title, text, okText = '确认', danger = true, onOk}) {
   $('#modalBody').innerHTML = `<p class="confirm-text">${text}</p>`;
   $('#modal').classList.remove('hidden');
   $('#confirmOk').onclick = async () => {
+    card.classList.remove('confirm');
     $('#modal').classList.add('hidden');
     try { await onOk(); } catch (e) { toast(e.message); }
   };
 }
-function closeModal() { $('#modal').classList.add('hidden'); resumeHotkeys(); }
+function closeModal() {
+  const card = document.querySelector('.modal-card');
+  if (card) card.classList.remove('narrow', 'settings', 'confirm', 'hide-close');
+  $('#modal').classList.add('hidden');
+  resumeHotkeys();
+}
 
 /* ---------- 详情抽屉 ---------- */
 function findRoom(id) {
@@ -715,25 +724,26 @@ function bindHotkeyInput(el) {
 window.onHostClose = () => {
   if (!$('#modal').classList.contains('hidden')) return;   // 已有弹窗时不叠加
   const showKey = lastState?.hotkey_show || 'Alt+F2';
+  // 清理旧弹窗残留的样式类，避免串到这个弹窗（"偶尔正常"的根因）
+  const card = document.querySelector('.modal-card');
+  if (card) { card.classList.remove('narrow', 'settings', 'hide-close'); card.classList.add('confirm'); }
   $('#modalTitle').textContent = '关闭窗口';
   $('#modalBody').innerHTML = `<p class="confirm-text">
     缩到托盘：继续在后台监测与录制，点托盘图标或按 <b>${esc(showKey)}</b> 叫回窗口。<br>
     退出程序：先收尾正在录制的文件再关闭，之后需要重新启动。</p>`;
   $('#modalFoot').innerHTML = `
-    <div class="foot-left">
-      <button class="btn ghost" data-close="1">取消</button>
-      <button class="btn" id="closeTray">缩到托盘</button>
-    </div>
+    <button class="btn ghost" data-close="1">取消</button>
+    <button class="btn" id="closeTray">缩到托盘</button>
     <button class="btn danger" id="closeQuit">退出程序</button>`;
-  // 点弹窗外空白就能关掉，右上角 × 就不要了
-  document.querySelector('.modal-card').classList.add('hide-close');
   $('#modal').classList.remove('hidden');
   $('#closeTray').onclick = async () => {
+    if (card) card.classList.remove('confirm');
     $('#modal').classList.add('hidden');
     try { await post('/api/window', {action: 'tray'}); }
     catch (e) { toast(e.message); }
   };
   $('#closeQuit').onclick = async () => {
+    if (card) card.classList.remove('confirm');
     $('#modal').classList.add('hidden');
     toast('正在退出…');
     try { await post('/api/quit'); } catch (e) { /* 进程已在退出 */ }
@@ -795,7 +805,7 @@ let modalSubmit = null;
 function openModal(title, bodyHtml, okText, onSubmit, footExtra = '') {
   // 每次打开先清掉上一次可能留下的弹窗样式标记，避免串到别的弹窗
   const card = document.querySelector('.modal-card');
-  if (card) card.classList.remove('narrow', 'hide-close');
+  if (card) card.classList.remove('narrow', 'hide-close', 'confirm', 'settings');
   $('#modalTitle').textContent = title;
   $('#modalBody').innerHTML = bodyHtml;
   // footExtra 放在底栏左侧，和取消/导入同一行，不再另行占一行

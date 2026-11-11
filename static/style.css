@@ -542,6 +542,14 @@ td:last-child .link-btn+.link-btn{margin-left:2px}
   text-overflow:ellipsis;white-space:nowrap}
 .section-label{font-size:11px;color:var(--on-surface-variant);letter-spacing:.7px;margin:18px 0 8px;font-weight:500}
 .confirm-text{margin:0;font-size:13px;line-height:1.8;color:var(--on-surface)}
+/* 确认删除等简单确认弹窗：收窄到 300px，取消在左、确认在右下角 */
+.modal-card.confirm{width:min(300px,92vw)}
+.modal-card.confirm .modal-head{padding:16px 20px 6px}
+.modal-card.confirm .modal-head .icon-btn{display:none}
+.modal-card.confirm .modal-head h3{font-size:16px}
+.modal-card.confirm .modal-body{padding:8px 20px 12px}
+.modal-card.confirm .modal-foot{display:flex;justify-content:space-between;gap:10px;padding:8px 20px 16px}
+.modal-card.confirm .modal-foot .btn{min-width:72px;height:34px;font-size:12.5px}
 .bye{display:grid;place-items:center;height:100vh;color:var(--on-surface-variant);font-size:14px;letter-spacing:.4px}
 
 /* ---------------- tooltip（MD3: inverse-surface 小气泡） ---------------- */

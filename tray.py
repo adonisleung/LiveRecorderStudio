@@ -202,6 +202,7 @@ class WindowHooks:
         self._running = False
         self._hidden = False
         self._placement = None      # 隐藏前的窗口位置，还原时放回原处
+        self._last_hwnd = 0        # hide() 记下的真实窗口句柄，show() 直接用
         self._icon = None
         self._icon_added = False
         self._thread = None
@@ -243,11 +244,13 @@ class WindowHooks:
             self._placement = pl
         user32.ShowWindow(hwnd, SW_HIDE)
         self._hidden = True
+        self._last_hwnd = hwnd       # 记住真窗口句柄，show() 直接用
         self._del_icon()
         return True
 
     def show(self) -> bool:
-        hwnd = self._find_main()
+        # 优先用 hide() 记下的句柄（已隐藏时 EnumWindows 找不到可见的）
+        hwnd = self._last_hwnd or self._find_main()
         if not hwnd:
             return False
         user32.ShowWindow(hwnd, SW_SHOW)
@@ -276,7 +279,39 @@ class WindowHooks:
 
     # ---------- 内部 ----------
     def _find_main(self):
-        return user32.FindWindowW(None, self.title)
+        """精确找主窗口：PID + 标题匹配，优先可见窗口。
+
+        FindWindowW(None, title) 在 WebView2 环境下不可靠——pywebview 会创建
+        多个同名隐藏辅助窗口，FindWindowW 按 Z-order 找到的第一个可能是隐藏的
+        假窗口，ShowWindow(SW_HIDE) 对它操作等于没隐藏真窗口。
+        这里用 EnumWindows 遍历「本进程 + 标题匹配」的窗口，优先返回可见的；
+        窗口已隐藏时（hide 之后），降级返回隐藏的真窗口（用于 show 还原）。
+        """
+        pid = kernel32.GetCurrentProcessId()
+        visible_hwnd = 0
+        hidden_hwnd = 0
+
+        @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+        def _enum_cb(hwnd, _lparam):
+            nonlocal visible_hwnd, hidden_hwnd
+            lp_pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(lp_pid))
+            if lp_pid.value != pid:
+                return True
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length <= 0:
+                return True
+            buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buf, length + 1)
+            if buf.value == self.title:
+                if user32.IsWindowVisible(hwnd):
+                    visible_hwnd = hwnd
+                    return False    # 找到可见的立即停
+                hidden_hwnd = hwnd  # 记住隐藏的做备用
+            return True
+
+        user32.EnumWindows(_enum_cb, 0)
+        return visible_hwnd or hidden_hwnd or user32.FindWindowW(None, self.title)
 
     def _run(self):
         try:

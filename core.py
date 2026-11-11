@@ -660,6 +660,44 @@ def _douyin(url: str, cfg: dict, prefer: str = 'flv') -> RoomInfo:
 KS_UID_RE = re.compile(r'live\.kuaishou\.com/(?:u|profile|fw/live)/([^/?#]+)')
 
 
+def _ks_did_cookie() -> str:
+    """生成快手 did 设备 Cookie：没有它快手一律返回「请求过快」。"""
+    import uuid
+    return f'did=web_{uuid.uuid4().hex}; didv={int(time.time() * 1000)}'
+
+
+def _ks_mobile_api(eid: str, cfg: dict) -> dict | None:
+    """快手移动端 API（优先方案，比网页抓取更不容易触发风控）。
+
+    POST livev.m.chenzhongtech.com/rest/k/live/byUser
+    失败返回 None，由调用方降级到网页抓取。
+    """
+    api = 'https://livev.m.chenzhongtech.com/rest/k/live/byUser?kpn=GAME_ZONE&captchaToken='
+    body = json.dumps({
+        'source': 5, 'eid': eid,
+        'shareMethod': 'card', 'clientType': 'WEB_OUTSIDE_SHARE_H5',
+    }).encode()
+    headers = {
+        'User-Agent': 'ios/7.830 (ios 17.0; ; iPhone 15 (A2846/A3089/A3090/A3092))',
+        'Accept-Language': 'zh-CN,zh;q=0.8',
+        'Referer': 'https://www.kuaishou.com/',
+        'content-type': 'application/json',
+        'Cookie': _ks_did_cookie(),
+    }
+    if cfg.get('cookie'):
+        headers['Cookie'] = cfg['cookie']
+    opener = _opener(str(cfg.get('proxy') or ''), bool(cfg.get('follow_system_proxy', True)))
+    try:
+        req = urllib.request.Request(api, data=body, headers=headers, method='POST')
+        with opener.open(req, timeout=12) as resp:
+            obj = json.loads(resp.read().decode('utf-8', errors='replace'))
+    except Exception:
+        return None
+    if not isinstance(obj, dict) or obj.get('result') != 1:
+        return None
+    return obj.get('liveStream') or {}
+
+
 def _ks_state(html: str) -> dict:
     """提取快手的 window.__INITIAL_STATE__。
 
@@ -744,7 +782,35 @@ def _kuaishou(url: str, cfg: dict) -> RoomInfo:
             raise ResolveError('UNSUPPORTED', '无法识别快手直播间地址')
         page = f'https://live.kuaishou.com/u/{uid}'
     pace('快手')
-    html = http_get(page, cfg)
+
+    # ── 方案 A：移动端 API（优先，更不容易触发风控） ──
+    eid = uid or (KS_UID_RE.search(page).group(1) if KS_UID_RE.search(page) else '')
+    if eid:
+        ls = _ks_mobile_api(eid, cfg)
+        if ls:
+            living = bool(ls.get('living'))
+            author = (ls.get('user') or {}).get('user_name') or ''
+            anchor = clean_anchor_name(author, '')
+            if living:
+                stream = ''
+                pu = ls.get('multiResolutionPlayUrls') or ls.get('playUrls') or []
+                if pu and isinstance(pu[0], dict):
+                    urls = pu[0].get('urls') or []
+                    if urls:
+                        stream = urls[0].get('url') if isinstance(urls[0], dict) else str(urls[0])
+                if not stream:
+                    stream = (ls.get('hlsPlayUrl') or ls.get('url') or '').strip()
+                if not stream:
+                    raise ResolveError('NO_STREAM', '已开播但未解析到播放地址（可能为付费/私密直播）')
+                return RoomInfo(anchor=anchor, title='', is_live=True,
+                                stream_url=stream, source='kuaishou')
+            return RoomInfo(anchor=anchor, title='', is_live=False, source='kuaishou')
+
+    # ── 方案 B：网页抓取（兜底） ──
+    ks_headers = {'Cookie': _ks_did_cookie()}
+    if cfg.get('cookie'):
+        ks_headers['Cookie'] = cfg['cookie']
+    html = http_get(page, cfg, headers=ks_headers)
     state = _ks_state(html)
     liveroom = state.get('liveroom') or {}
     play = liveroom.get('playList') or []
@@ -935,6 +1001,11 @@ class Engine:
     def save_config(self, patch: dict) -> dict:
         with self.lock:
             for k, v in patch.items():
+                # port 是运行时动态分配的监听端口，绝不能被前端配置持久化：
+                # 一旦写进 config，下次启动 pick_port 会从这个被污染的端口起跳，
+                # 与 find_running_instance 的基准失配，导致多实例检测失效、热键被抢。
+                if k == 'port':
+                    continue
                 if k in DEFAULT_CONFIG:
                     self.cfg[k] = v
             self.config_path.write_text(
@@ -1153,7 +1224,11 @@ class Engine:
                         # 平台熔断期内整批跳过：继续排期只会把限流窗口越拉越长
                         if platform_blocked(platform_of(r.url)):
                             continue
-                        # 录制中的房间也要按时复检：否则主播下播后 ffmpeg 会一直挂着
+                        # 正在录制的房间不再扫描：主播下播由 _watch_processes 的
+                        # ffmpeg 进程监控兜底（进程退出即收尾），重复扫描同一正在
+                        # 录制的直播间纯属浪费资源、徒增风控风险。
+                        if rid in self.processes:
+                            continue
                         if self.next_check.get(rid, 0) <= now:
                             due.append(rid)
                 # 新加的房间插队；其余按「扫描优先级」排序：

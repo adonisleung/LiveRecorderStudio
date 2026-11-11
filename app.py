@@ -483,7 +483,7 @@ def find_running_instance(start: int) -> int | None:
             except OSError:
                 pass
 
-    ports = list(range(start, start + 12))
+    ports = list(range(start, start + 16))
     with ThreadPoolExecutor(max_workers=len(ports)) as pool:
         cand = [p for p in pool.map(alive, ports) if p]
     if not cand:
@@ -908,6 +908,9 @@ def main():
     _redirect_std()
 
     # 已有实例在跑：只把窗口开出来指向它，不再启动第二个（否则会重复录制）
+    # 端口基准不能写死 8765：config 里 port 可能被历史漂移污染（如 8792），
+    # 写死会检测不到「跑在其他端口的实例」，导致每次都新起进程、热键被反复抢占。
+    # find_running_instance 内部扫 8765 起 16 个端口，覆盖默认与漂移范围。
     existing = find_running_instance(8765)
     if existing and '--port' not in sys.argv:
         url = f'http://127.0.0.1:{existing}/'
@@ -922,9 +925,11 @@ def main():
         return
 
     ENGINE = Engine()
-    if _arg('--port'):
-        ENGINE.cfg['port'] = int(_arg('--port'))
-    server, port = pick_port(int(ENGINE.cfg.get('port', 8765)))
+    # 端口固定从 8765 起步动态分配（或显式 --port），不读 config 里的 port：
+    # 那个字段会被历史漂移污染（如 8792），一旦固化，pick_port 起跳点
+    # 就与 find_running_instance 的探测范围失配，导致多实例检测失效。
+    _port_base = int(_arg('--port') or 8765)
+    server, port = pick_port(_port_base)
     SERVER = server
     HTTP_PORT = port
     url = f'http://127.0.0.1:{port}/'
