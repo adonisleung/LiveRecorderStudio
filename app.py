@@ -856,6 +856,8 @@ def _open_window(url: str) -> bool:
             print(f'热键: 隐藏 {HOOKS.hide_key or "无"} / 还原 {HOOKS.show_key or "无"}')
         except Exception as e:
             _quit_trace(f'hooks failed: {type(e).__name__}: {e}')
+        # 禁用 WebView2 GPU 渲染：部分显卡驱动下 GPU 加速导致整个页面黑屏
+        os.environ.setdefault('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', '--disable-gpu')
         webview.start(gui='edgechromium', icon=str(ICON) if ICON else None)
         if HOOKS:
             HOOKS.stop()
