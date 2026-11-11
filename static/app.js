@@ -94,7 +94,7 @@ function roomRow(r) {
   return `<tr data-id="${r.id}" class="${st}">
     <td><span class="tag ${waiting ? 'wait' : st}" title="${waiting ? `${plat}限流静默中，约 ${Math.ceil(blocked / 60)} 分钟后重试` : ''}">${waiting ? '限流等待' : (STATUS[st] || st)}</span></td>
     <td><span class="tip-wrap plat-ico ${st}" data-tip="${esc(plat)}${st === 'recording' ? ' · 正在录制' : st === 'live' ? ' · 直播中' : ''}">${ICON[plat] || ICON['自定义']}</span></td>
-    <td><div class="room-name"><span class="nm nm-click" data-act="detail" title="${esc(nameOf(r))} · 点击查看详情"><span class="nm-txt">${esc(nameOf(r))}</span></span></div>${sub}</td>
+    <td><div class="room-name"><span class="nm nm-click" data-act="detail" title="${r.is_live || r.status === 'recording' ? esc(viewersText(r.viewers)) + ' 在线 · ' : ''}点击查看详情"><span class="nm-txt">${esc(nameOf(r))}</span></span></div>${sub}</td>
     <td class="q-col"><span class="mono dur" data-dur="${r.id}">${durText(r.rec_seconds)}</span></td>
     <td><div class="row-actions">
       <button class="icon-act tip-wrap" data-act="folder" data-tip="打开文件夹">${ICON.folder}</button>
@@ -160,15 +160,17 @@ function render(s) {
   const paceTxt = Object.entries(s.pace || {})
     .filter(([, v]) => v > 0.6).map(([k, v]) => `${k} ${v}s/次`).join(' · ');
   $('#footConfig').textContent =
-    `间隔 ${cfg.interval}s · 错峰 1/${cfg.jitter_ratio} · 并发 ${cfg.concurrency} · ${String(cfg.format||'ts').toUpperCase()}`
-    + (paceTxt ? ` · 已降速：${paceTxt}` : '')
-    + (blocked.length ? ` · ${blocked.map(([k, v]) => `${k}静默 ${Math.ceil(v/60) ? Math.ceil(v/60) + ' 分' : v + ' 秒'}`).join('、')}` : '');
+    `${cfg.interval}s · 1/${cfg.jitter_ratio} · ${cfg.concurrency} · ${String(cfg.format||'ts').toUpperCase()}`
+    + (paceTxt ? ` · 降速` : '')
+    + (blocked.length ? ` · 静默` : '');
   $('#footConfig').style.color = blocked.length ? 'var(--amber)' : '';
   $('#footFfmpeg').textContent = s.ffmpeg ? 'ffmpeg 已就绪' : 'ffmpeg 未找到';
   $('#footFfmpeg').style.color = s.ffmpeg ? '' : 'var(--red)';
-  $('#footHotkey').textContent = s.hotkey_hide
-    ? `· ${s.hotkey_hide} 隐藏 · ${s.hotkey_show || '—'} 还原`
-    : (s.hotkey_tray ? '· 热键被占用，已启用托盘图标' : '');
+  const hkEl = $('#footHotkey');
+  hkEl.textContent = s.hotkey_hide
+    ? `${s.hotkey_hide} 隐藏 · ${s.hotkey_show || '—'} 还原`
+    : (s.hotkey_tray ? '热键被占用，已启用托盘图标' : '');
+  hkEl.style.display = hkEl.textContent ? '' : 'none';
 
   const logs = s.logs || [];
   const lsig = logs.length + ':' + (logs.length ? logs[logs.length-1].t + logs[logs.length-1].text : '');
@@ -745,6 +747,8 @@ window.onHostClose = () => {
   $('#closeQuit').onclick = async () => {
     if (card) card.classList.remove('confirm');
     $('#modal').classList.add('hidden');
+    // 立即关窗不等后端收尾，退出体验零延迟
+    try { await post('/api/window', {action: 'hide'}); } catch (e) {}
     toast('正在退出…');
     try { await post('/api/quit'); } catch (e) { /* 进程已在退出 */ }
     document.body.innerHTML = '<div class="bye">已退出，可关闭此窗口。</div>';

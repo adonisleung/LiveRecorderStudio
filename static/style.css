@@ -316,14 +316,15 @@ td:last-child .link-btn+.link-btn{margin-left:2px}
 
 /* ---------------- footer ----------------
    状态栏默认藏起来：只在底部留一条细边，鼠标移到窗口底边才滑出（不挤压表格） */
-.statusbar{position:fixed;left:0;right:0;bottom:0;z-index:15;height:38px;
-  padding:0 18px;border-top:1px solid var(--outline-variant);display:flex;align-items:center;
-  gap:12px;font-size:11.5px;color:var(--on-surface-variant);letter-spacing:.2px;
+.statusbar{position:fixed;left:0;right:0;bottom:0;z-index:15;height:36px;
+  padding:0 16px;border-top:1px solid var(--outline-variant);display:flex;align-items:center;
+  justify-content:center;gap:6px;font-size:11px;color:var(--on-surface-variant);letter-spacing:.2px;
   background:var(--surface-c);box-shadow:0 -6px 18px rgba(0,0,0,.28);
   transform:translateY(calc(100% - 11px));transition:transform .18s ease}
 .statusbar:hover{transform:translateY(0)}
-.statusbar .sep{width:1px;height:12px;background:var(--outline-variant)}
-.statusbar .grow{flex:1}
+.statusbar .sb-item{padding:3px 10px;background:var(--surface-c-lowest);border-radius:20px;
+  border:1px solid var(--outline-variant);white-space:nowrap}
+.statusbar .sb-note{font-size:10px;opacity:.55;background:none;border-color:transparent}
 .muted{color:var(--dim)}
 
 /* ---------------- dialogs ---------------- */
@@ -653,7 +654,7 @@ tbody tr:first-child .tip-wrap:hover::after{transform:translate(-50%,0)}
   .table-wrap:not(.two-col) th:nth-child(5),.table-wrap:not(.two-col) td:nth-child(5){width:118px}
   .table-wrap:not(.two-col) td:nth-child(3){overflow:hidden;text-overflow:ellipsis}
   .room-url,.room-err{max-width:210px}
-  .statusbar{flex-wrap:wrap;height:auto;padding:8px 0;gap:8px}
+  .statusbar{flex-wrap:wrap;height:auto;padding:8px 0;gap:8px;justify-content:center}
 }
 
 /* 详情预览播放器（hls.js + MSE，同抖音网页播放器方案） */

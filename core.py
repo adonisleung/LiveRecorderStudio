@@ -1158,7 +1158,7 @@ class Engine:
         self.log('ok', f"监测已启动：{len(self.rooms)} 个房间，间隔 {self.cfg['interval']}s，"
                        f"并发 {self.cfg['concurrency']}")
 
-    def halt_and_finalize(self, budget: float = 4.0):
+    def halt_and_finalize(self, budget: float = 3.0):
         """退出程序专用：快速终止录制并尽力转码，总耗时有上限。
 
         不能用 stop() 那条路径——它逐个 wait(timeout=3) 再 join，

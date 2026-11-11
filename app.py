@@ -182,7 +182,7 @@ def _quit_trace(msg: str):
         pass
 
 
-def request_quit(wait: float = 0.4):
+def request_quit(wait: float = 0.1):
     """界面里点「退出程序」时调用：限时收尾录制，然后直接退出进程。
 
     走 halt_and_finalize 而不是 stop()：后者的逐进程等待会让退出拖到十几秒。
