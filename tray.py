@@ -265,20 +265,20 @@ class WindowHooks:
         return True
 
     def show(self) -> bool:
-        # 优先用 hide() 记下的句柄（已隐藏时 EnumWindows 找不到可见的）
         hwnd = self._last_hwnd or self._find_main()
         if not hwnd:
             return False
-        # 最小化时 SW_SHOW 无效，必须用 SW_RESTORE
+        # 最小化时必须先 SW_RESTORE 才能正常显示和置前
         if user32.IsIconic(hwnd):
             user32.ShowWindow(hwnd, SW_RESTORE)
-        else:
-            user32.ShowWindow(hwnd, SW_SHOW)
-        if self._placement is not None:
+        elif self._placement is not None:
             pl = self._placement
             pl.length = ctypes.sizeof(WINDOWPLACEMENT)
             user32.SetWindowPlacement(hwnd, ctypes.byref(pl))
             self._placement = None
+            user32.ShowWindow(hwnd, SW_SHOW)
+        else:
+            user32.ShowWindow(hwnd, SW_SHOW)
         user32.SetForegroundWindow(hwnd)
         self._hidden = False
         self._del_icon()
@@ -549,7 +549,15 @@ class WindowHooks:
                 elif hid == 3:
                     self.import_requested = True
                     self.import_from_hidden = self._hidden
-                    self.show()
+                    if self._hidden or user32.IsIconic(self._last_hwnd or 0):
+                        self.show()
+                    # 直接调前端，不等轮询（省 1.5-2 秒）
+                    try:
+                        import webview as _wv
+                        if _wv.windows:
+                            _wv.windows[0].evaluate_js('openImportDialog && openImportDialog()')
+                    except Exception:
+                        pass
                 return 0
             if msg == WM_TRAY:
                 ev = int(lparam) & 0xFFFF

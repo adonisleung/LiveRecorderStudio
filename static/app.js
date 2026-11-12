@@ -870,6 +870,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 function openImportDialog() {
+  if (!document.querySelector('#modal').classList.contains('hidden')) return;
   try {
     const cfg = lastState?.config || {};
     const importKey = cfg.hotkey_import || 'Alt+1';
