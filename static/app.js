@@ -107,6 +107,11 @@ function roomRow(r) {
 
 function render(s) {
   lastState = s;
+  // 全局导入热键触发（窗口隐藏时也能弹出）
+  if (s.import_requested && $('#modal').classList.contains('hidden')) {
+    openImportDialog();
+    return;
+  }
   const cfg = s.config || {};
   const rooms = s.rooms || [];
   // 只有「会改变行结构」的字段进入签名；时长/大小每轮都在跳，
@@ -556,12 +561,24 @@ function bindDrawer(r) {
   $('#dSave').onclick = async () => {
     const val = $('#dAlias').value.trim();
     const origin = $('#dAlias').dataset.origin || '';
-    // 回填的名字只是「显示」，没被改动就不写死 alias：
-    // 这样抖音以后改昵称，列表和录制目录还能自动跟着变。
     const alias = val === origin ? (r.alias || '') : val;
-    await api('/api/rooms/' + r.id, {method:'PATCH', body: JSON.stringify({
-      alias, note: $('#dNote').value.trim()})});
-    toast('已保存'); lastRoomSig = ''; await refresh();
+    const isRecording = r.status === 'recording';
+    const aliasChanged = (alias || '') !== (r.alias || '');
+    // 录制中改名：先停录保存再重开，让新文件名生效
+    if (isRecording && aliasChanged) {
+      toast('录制中改名，重启录制…');
+      try { await post('/api/record/' + r.id + '/stop'); } catch (e) {}
+      await api('/api/rooms/' + r.id, {method:'PATCH', body: JSON.stringify({
+        alias, note: $('#dNote').value.trim()})});
+      const res = await post('/api/record/' + r.id + '/start');
+      if (res && res.ok) toast('已改名并重新录制');
+      else toast('已改名，但重新录制失败（' + (res?.error || '未知原因') + '）');
+    } else {
+      await api('/api/rooms/' + r.id, {method:'PATCH', body: JSON.stringify({
+        alias, note: $('#dNote').value.trim()})});
+      toast('已保存');
+    }
+    lastRoomSig = ''; await refresh();
     const fresh = findRoom(r.id);
     if (fresh) { $('#drawerTitle').textContent = nameOf(fresh); }
   };
@@ -824,11 +841,52 @@ $('#modal').addEventListener('click', (e) => {
   if (e.target.id === 'modal' || e.target.dataset.close) closeModal();
 });
 
-$('#btnImport').onclick = () => {
+$('#btnImport').onclick = openImportDialog;
+// 快捷键打开导入框（默认 Alt+1，可自定义）
+document.addEventListener('keydown', (e) => {
+  if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
+  const parts = [];
+  if (e.ctrlKey) parts.push('Ctrl');
+  if (e.altKey) parts.push('Alt');
+  if (e.shiftKey) parts.push('Shift');
+  if (e.metaKey) parts.push('Win');
+  let key = e.key;
+  if (key === ' ') key = 'Space';
+  else if (key.length === 1) key = key.toUpperCase();
+  parts.push(key);
+  const combo = parts.join('+');
+  const wantKey = (lastState?.config?.hotkey_import) || 'Alt+1';
+  if (combo === wantKey && $('#modal').classList.contains('hidden')) {
+    e.preventDefault();
+    openImportDialog();
+  }
+});
+
+function openImportDialog() {
+  const cfg = lastState?.config || {};
+  const importKey = cfg.hotkey_import || 'Alt+1';
   openModal('导入', `
   <textarea id="importText" placeholder="支持批量导入&#10;一行一个直播间地址，例如：&#10;https://live.douyin.com/745964462470&#10;https://live.kuaishou.com/u/sunni777&#10;demo://离线演示"></textarea>
 `,
-  '导入', async () => {
+  '导入', null, '');
+  // 窄版 + 自定义头部 + 底部按钮两端对齐
+  const card = document.querySelector('.modal-card');
+  card.classList.add('narrow', 'import-dialog');
+  // 头部：导入标题 + 可改快捷键 + 粘贴按钮
+  card.querySelector('.modal-head').innerHTML = `
+    <h3>导入</h3>
+    <div class="import-head-right">
+      <input class="input keycap" id="importHotkey" readonly value="${esc(importKey)}" title="点击后按新组合键更改快捷键">
+      <button class="btn small tonal" id="btnPasteIn" title="粘贴剪贴板内容">粘贴</button>
+    </div>`;
+  // 底栏：导出列表在左，取消+导入在右下角
+  $('#modalFoot').innerHTML = `
+    <div class="foot-left"><button class="btn small ghost" id="btnExport">导出列表</button></div>
+    <div class="foot-right">
+      <button class="btn ghost" data-close="1">取消</button>
+      <button class="btn primary" id="modalOk">导入</button>
+    </div>`;
+  $('#modalOk').onclick = async () => {
     const text = $('#importText').value;
     if (!text.trim()) return closeModal();
     const r = await post('/api/rooms', {text});
@@ -838,17 +896,37 @@ $('#btnImport').onclick = () => {
     if (r.ignored) bits.push(`无地址 ${r.ignored} 行`);
     toast(bits.join(' · '));
     lastRoomSig = ''; refresh();
-  },
-  `<button class="btn small tonal" id="btnPasteIn">粘贴</button>
-   <button class="btn small ghost" id="btnExport">导出列表</button>`);
-  // 导入弹窗内容少，用窄版：420px 宽、输入框 150px 高，不留大片空白
-  document.querySelector('.modal-card').classList.add('narrow');
-  bindImportExport();
-};
-
-function bindImportExport() {
+  };
   $('#btnExport').onclick = () => showExportModal();
   $('#btnPasteIn').onclick = () => pasteInto($('#importText'));
+  bindImportHotkey();
+}
+
+function bindImportHotkey() {
+  const el = $('#importHotkey');
+  if (!el) return;
+  el.addEventListener('focus', () => { suspendHotkeys(); });
+  el.addEventListener('blur', () => { resumeHotkeys(); });
+  el.addEventListener('keydown', (e) => {
+    e.preventDefault();
+    if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
+    const parts = [];
+    if (e.ctrlKey) parts.push('Ctrl');
+    if (e.altKey) parts.push('Alt');
+    if (e.shiftKey) parts.push('Shift');
+    if (e.metaKey) parts.push('Win');
+    let key = e.key;
+    if (key === ' ') key = 'Space';
+    else if (key.length === 1) key = key.toUpperCase();
+    parts.push(key);
+    const combo = parts.join('+');
+    el.value = combo;
+    el.blur();
+    // 保存到 config
+    post('/api/config', {hotkey_import: combo}).then(() => {
+      toast(`导入快捷键已改为 ${combo}`);
+    });
+  });
 }
 
 /* ---------- 文本框粘贴/右键菜单 ----------
@@ -1003,6 +1081,11 @@ $('#btnSettings').onclick = async () => {
       </div>
     </div>
     <div class="field"><label>Cookie（可选，抖音风控时填写）</label><textarea id="cCookie">${esc(c.cookie)}</textarea></div>
+    <div class="field">
+      <label>手动停止后暂停监测（分钟，0 = 不限制）</label>
+      <input class="input" id="cStopCooldown" type="number" min="0" max="1440" value="${esc(c.manual_stop_cooldown || 0)}">
+      <p class="hint">手动停止录制后，该直播间在设定时间内不会被自动重新录制。防止误操作后又被自动拉起。</p>
+    </div>
     <div class="field-row check-row">
       <label class="check"><input type="checkbox" id="cAutoMp4" ${c.auto_mp4 ? 'checked' : ''}> 录制结束自动转 MP4</label>
       <label class="check"><input type="checkbox" id="cKeepTs" ${c.keep_ts ? 'checked' : ''}> 转换后保留原始 .ts</label>
@@ -1040,6 +1123,7 @@ $('#btnSettings').onclick = async () => {
         cookie: $('#cCookie').value.trim(),
         auto_mp4: $('#cAutoMp4').checked,
         keep_ts: $('#cKeepTs').checked,
+        manual_stop_cooldown: parseInt($('#cStopCooldown').value) || 0,
         hotkey_hide: keyHide,
         hotkey_show: keyShow,
       });

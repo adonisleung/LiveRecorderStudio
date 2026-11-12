@@ -260,6 +260,12 @@ def make_handler(engine: Engine):
                 data['hotkey_hide'] = (HOOKS.hide_key if HOOKS else '')
                 data['hotkey_show'] = (HOOKS.show_key if HOOKS else '')
                 data['hotkey_tray'] = bool(HOOKS and HOOKS.used_tray)
+                # 全局导入热键触发标记：读取后立即重置，前端轮询到就弹导入框
+                if HOOKS and HOOKS.import_requested:
+                    data['import_requested'] = True
+                    HOOKS.import_requested = False
+                else:
+                    data['import_requested'] = False
                 return self._json(data)
             if path == '/api/browse':
                 target = (parse_qs(parsed.query).get('path') or [''])[0]
@@ -850,10 +856,11 @@ def _open_window(url: str) -> bool:
                 APP_TITLE, on_quit=_tray_quit, tip='LiveRecorder Studio',
                 icon_path=ICON,
                 hide_hotkey=(ENGINE.cfg.get('hotkey_hide', '') if ENGINE else ''),
-                show_hotkey=(ENGINE.cfg.get('hotkey_show', '') if ENGINE else ''))
+                show_hotkey=(ENGINE.cfg.get('hotkey_show', '') if ENGINE else ''),
+                import_hotkey=(ENGINE.cfg.get('hotkey_import', 'Alt+1') if ENGINE else ''))
             HOOKS.start()
             TRAY = HOOKS
-            print(f'热键: 隐藏 {HOOKS.hide_key or "无"} / 还原 {HOOKS.show_key or "无"}')
+            print(f'热键: 隐藏 {HOOKS.hide_key or "无"} / 还原 {HOOKS.show_key or "无"} / 导入 {HOOKS.import_key or "无"}')
         except Exception as e:
             _quit_trace(f'hooks failed: {type(e).__name__}: {e}')
         # 禁用 WebView2 GPU 渲染：部分显卡驱动下 GPU 加速导致整个页面黑屏

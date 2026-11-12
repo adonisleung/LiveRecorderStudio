@@ -57,6 +57,8 @@ DEFAULT_CONFIG = {
     'keep_ts': False,          # 转换成功后是否保留原始 .ts
     'hotkey_hide': 'Alt+F1',   # 隐藏窗口（不留托盘图标）
     'hotkey_show': 'Alt+F2',   # 还原窗口
+    'manual_stop_cooldown': 0, # 手动停止后暂停监测时长（分钟），0=不限制
+    'hotkey_import': 'Alt+1',  # 打开导入框的快捷键
 }
 
 
@@ -271,6 +273,7 @@ class Room:
     started_at: float = 0
     rec_bytes: int = 0
     rec_checked: float = 0
+    stop_until: float = 0          # 手动停止后的冷却截止时间戳，冷却期内不自动重录
     rec_seconds: float = 0       # 本次录制已持续秒数，列表「已录制时长」直接用
     offline_hits: int = 0
     viewers: int = 0              # 最近一次检测时的在线人数快照（不落盘）
@@ -1044,7 +1047,7 @@ class Engine:
     def _save_rooms(self):
         try:
             data = [{k: getattr(r, k) for k in
-                     ('id', 'url', 'note', 'quality', 'enabled', 'alias', 'anchor')}
+                     ('id', 'url', 'note', 'quality', 'enabled', 'alias', 'anchor', 'stop_until')}
                     for r in self.rooms.values()]
             self.rooms_path().write_text(
                 json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -1150,6 +1153,8 @@ class Engine:
             for rid, r in self.rooms.items():
                 if not r.enabled or rid in self.processes:
                     continue
+                if r.stop_until and r.stop_until > now:
+                    continue
                 # 只在「没有排期」或「排期过远」时重排，避免打断已有的错峰相位
                 if rid not in self.next_check or self.next_check[rid] - now > spread:
                     self.next_check[rid] = now + random.uniform(0, spread)
@@ -1220,6 +1225,9 @@ class Engine:
                 with self.lock:
                     for rid, r in self.rooms.items():
                         if not r.enabled:
+                            continue
+                        # 手动停止后冷却期内不扫描
+                        if r.stop_until and r.stop_until > now:
                             continue
                         # 平台熔断期内整批跳过：继续排期只会把限流窗口越拉越长
                         if platform_blocked(platform_of(r.url)):
@@ -1895,6 +1903,12 @@ class Engine:
             if rid not in self.processes:
                 return False
             self._stop_record(rid)
+            # 手动停止后设定冷却期，期间扫描循环跳过该房间
+            cooldown_min = int(self.cfg.get('manual_stop_cooldown') or 0)
+            if cooldown_min > 0:
+                r = self.rooms.get(rid)
+                if r:
+                    r.stop_until = time.time() + cooldown_min * 60
             return True
 
     def start_record(self, rid: str) -> dict:

@@ -543,6 +543,16 @@ td:last-child .link-btn+.link-btn{margin-left:2px}
   text-overflow:ellipsis;white-space:nowrap}
 .section-label{font-size:11px;color:var(--on-surface-variant);letter-spacing:.7px;margin:18px 0 8px;font-weight:500}
 .confirm-text{margin:0;font-size:13px;line-height:1.8;color:var(--on-surface)}
+/* 导入弹窗：标题栏放快捷键标签 + 粘贴按钮，底部导出列表居左、导入居右 */
+.modal-card.import-dialog .modal-head{display:flex;align-items:center;justify-content:space-between;padding:16px 20px 6px}
+.modal-card.import-dialog .modal-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 20px 14px}
+.modal-card.import-dialog .modal-foot .foot-right{display:flex;gap:10px;margin-left:auto}
+.modal-card.import-dialog .modal-foot .btn{min-width:72px;height:34px;font-size:12.5px}
+.import-head-right{display:flex;align-items:center;gap:10px}
+.hotkey-badge{padding:3px 10px;border-radius:20px;border:1px solid var(--outline-variant);
+  font-size:11px;color:var(--on-surface-variant);letter-spacing:.3px;background:var(--surface-c-lowest);
+  user-select:none;cursor:pointer}
+.hotkey-badge:hover{border-color:var(--primary);color:var(--primary)}
 /* 确认删除等简单确认弹窗：收窄到 300px，取消在左、确认在右下角 */
 .modal-card.confirm{width:min(300px,92vw)}
 .modal-card.confirm .modal-head{padding:16px 20px 6px}

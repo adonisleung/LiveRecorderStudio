@@ -186,15 +186,19 @@ class WindowHooks:
     """快捷键隐藏/还原 + 可选托盘图标。"""
 
     def __init__(self, title: str, on_quit=None, tip: str = 'LiveRecorder Studio',
-                 icon_path=None, hide_hotkey: str = '', show_hotkey: str = ''):
+                 icon_path=None, hide_hotkey: str = '', show_hotkey: str = '',
+                 import_hotkey: str = ''):
         self.title = title
         self.on_quit = on_quit
         self.tip = tip[:120]
         self.icon_path = icon_path
         self.hide_key = ''          # 实际生效的「隐藏」组合键
         self.show_key = ''          # 实际生效的「还原」组合键
+        self.import_key = ''        # 实际生效的「导入」组合键
         self.want_hide = hide_hotkey or ''
         self.want_show = show_hotkey or ''
+        self.want_import = import_hotkey or ''
+        self.import_requested = False  # 导入热键触发标记，前端轮询消费
         self.used_tray = False      # 隐藏键注册失败时才会挂托盘兜底
         self._hwnd_msg = None
         self._proc_ref = None
@@ -388,15 +392,16 @@ class WindowHooks:
         res['ok'] = True
         return res
 
-    def _apply_keys(self, hide_text: str, show_text: str) -> dict:
-        for hid in (1, 2):
+    def _apply_keys(self, hide_text: str, show_text: str, import_text: str = '') -> dict:
+        for hid in (1, 2, 3):
             user32.UnregisterHotKey(self._hwnd_msg, hid)
         if hide_text == '__suspend__':      # 录入期间：两个键都不注册，按键直达输入框
-            self.hide_key = self.show_key = ''
+            self.hide_key = self.show_key = self.import_key = ''
             return {'hide': '', 'show': '', 'want_hide': self.want_hide,
                     'want_show': self.want_show, 'suspended': True}
         self.hide_key = self._try_bind(1, hide_text, HIDE_KEYS)
         self.show_key = self._try_bind(2, show_text, SHOW_KEYS)
+        self.import_key = self._try_bind(3, import_text or self.want_import, []) if (import_text or self.want_import) else ''
         if not self.hide_key:
             # 连隐藏键都注册不上：挂托底图标，别让窗口被藏死找不回来
             self.used_tray = True
@@ -489,6 +494,10 @@ class WindowHooks:
                     self.hide()
                 elif hid == 2:
                     self.show()
+                elif hid == 3:
+                    # 导入热键：弹出窗口并让前端打开导入框
+                    self.import_requested = True
+                    self.show()
                 return 0
             if msg == WM_TRAY:
                 ev = int(lparam) & 0xFFFF
@@ -506,7 +515,7 @@ class WindowHooks:
             if msg == WM_DESTROY:
                 self._del_icon()
                 if self._hwnd_msg:
-                    for hid in (1, 2):
+                    for hid in (1, 2, 3):
                         user32.UnregisterHotKey(self._hwnd_msg, hid)
                 user32.PostQuitMessage(0)
                 return 0
