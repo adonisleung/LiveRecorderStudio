@@ -210,6 +210,7 @@ class WindowHooks:
         self.import_requested = False  # 导入热键触发标记，前端轮询消费
         self.import_from_hidden = False  # 导入前窗口是否处于隐藏状态
         self._saved_style = 0        # 去边框前保存的窗口样式
+        self._saved_rect = None      # 缩小前保存的窗口位置大小
         self.used_tray = False      # 隐藏键注册失败时才会挂托盘兜底
         self._hwnd_msg = None
         self._proc_ref = None
@@ -284,7 +285,7 @@ class WindowHooks:
         return True
 
     def set_borderless(self) -> bool:
-        """去掉窗口标题栏和边框（用于独立弹窗模式）。"""
+        """去掉标题栏并缩成小弹窗（居中显示），视觉上独立于主窗口。"""
         hwnd = self._last_hwnd or self._find_main()
         if not hwnd:
             return False
@@ -293,12 +294,21 @@ class WindowHooks:
         WS_THICKFRAME = 0x00040000
         style = user32.GetWindowLongW(hwnd, GWL_STYLE)
         self._saved_style = style
+        self._saved_rect = wintypes.RECT()
+        user32.GetWindowRect(hwnd, ctypes.byref(self._saved_rect))
         user32.SetWindowLongW(hwnd, GWL_STYLE, style & ~(WS_CAPTION | WS_THICKFRAME))
-        user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0002 | 0x0001 | 0x0020)  # NOMOVE|NOSIZE|FRAMECHANGED
+        # 缩成小弹窗居中
+        import ctypes.wintypes as wt
+        sw = user32.GetSystemMetrics(0)  # 屏宽
+        sh = user32.GetSystemMetrics(1)  # 屏高
+        w, h = 480, 380
+        x, y = (sw - w) // 2, (sh - h) // 2
+        user32.SetWindowPos(hwnd, 0, x, y, w, h,
+                            0x0002 | 0x0004 | 0x0020)  # NOZORDER|NOACTIVATE|FRAMECHANGED
         return True
 
     def restore_border(self) -> bool:
-        """恢复窗口标题栏和边框。"""
+        """恢复标题栏和原始窗口大小。"""
         hwnd = self._last_hwnd or self._find_main()
         if not hwnd:
             return False
@@ -306,7 +316,11 @@ class WindowHooks:
         if self._saved_style:
             user32.SetWindowLongW(hwnd, GWL_STYLE, self._saved_style)
             self._saved_style = 0
-            user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0002 | 0x0001 | 0x0020)
+        if self._saved_rect:
+            r = self._saved_rect
+            user32.SetWindowPos(hwnd, 0, r.left, r.top, r.right - r.left, r.bottom - r.top,
+                                0x0002 | 0x0004 | 0x0020)
+            self._saved_rect = None
         return True
 
     def to_tray(self) -> bool:
