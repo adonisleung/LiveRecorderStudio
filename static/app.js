@@ -7,7 +7,7 @@ let hoverPause = false;        // 鼠标悬停表格时暂停重建，避免行�
 let pendingRebuild = false;    // 悬停/节流期间攒下的重建任务
 let lastRebuild = 0;           // 上次整表重建时刻（重建节流）
 let lastLogRebuild = 0;        // 上次日志重建时刻（日志节流）
-let drawerId = null, lastState = null, importFromHidden = false;
+let drawerId = null, lastState = null;
 const STATUS = {idle:'待检查', checking:'检测中', offline:'未开播', live:'直播中', recording:'录制中', error:'异常'};
 
 async function api(path, opts = {}) {
@@ -107,9 +107,9 @@ function roomRow(r) {
 
 function render(s) {
   lastState = s;
-  // 全局导入热键触发（窗口隐藏时也能弹出）
+  // 全局导入热键触发（回退路径，evaluate_js 失败时用）
   if (s.import_requested) {
-    importFromHidden = !!s.import_from_hidden;
+    window._importFromHidden = !!s.import_from_hidden;
     if ($('#modal').classList.contains('hidden')) openImportDialog();
     return;
   }
@@ -293,8 +293,8 @@ function closeModal() {
   if (card) card.classList.remove('narrow', 'settings', 'confirm', 'hide-close', 'import-dialog');
   $('#modal').classList.add('hidden');
   resumeHotkeys();
-  if (importFromHidden) {
-    importFromHidden = false;
+  if (window._importFromHidden) {
+    window._importFromHidden = false;
     post('/api/window', {action: 'hide'}).catch(() => {});
   }
 }
@@ -952,6 +952,7 @@ function bindImportHotkey() {
     el.blur();
     // 保存到 config
     post('/api/config', {hotkey_import: combo}).then(() => {
+      if (lastState?.config) lastState.config.hotkey_import = combo;
       toast(`导入快捷键已改为 ${combo}`);
     });
   });

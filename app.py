@@ -414,9 +414,10 @@ def make_handler(engine: Engine):
                                                'error': f'保存位置不可写：{e}'}, 400)
                     cfg = engine.save_config(body)
                     bind = None
-                    if HOOKS and ('hotkey_hide' in body or 'hotkey_show' in body):
+                    if HOOKS and ('hotkey_hide' in body or 'hotkey_show' in body or 'hotkey_import' in body):
                         bind = HOOKS.rebind(cfg.get('hotkey_hide', ''),
-                                            cfg.get('hotkey_show', ''))
+                                            cfg.get('hotkey_show', ''),
+                                            cfg.get('hotkey_import', ''))
                     return self._json({'ok': True, 'config': cfg, 'hotkeys': bind,
                                        'save_path': str(engine.save_root())})
                 if path == '/api/open-folder':

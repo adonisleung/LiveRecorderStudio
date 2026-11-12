@@ -400,29 +400,26 @@ class WindowHooks:
     def _register_hotkeys(self):
         self._apply_keys(self.want_hide, self.want_show)
 
-    def rebind(self, hide_text: str, show_text: str) -> dict:
-        """运行时换键。
-
-        RegisterHotKey 必须回到创建消息窗口的那个线程执行——同一个 ID
-        跨线程重注册会直接失败（实测两个键都注册不上），所以这里投递消息，
-        由钩子线程完成注册后再把结果回传。
-        """
+    def rebind(self, hide_text: str, show_text: str, import_text: str = '') -> dict:
         self.want_hide, self.want_show = hide_text or '', show_text or ''
+        self.want_import = import_text or ''
         if not self._hwnd_msg:
-            return {'hide': '', 'show': '', 'want_hide': self.want_hide,
-                    'want_show': self.want_show}
+            return {'hide': '', 'show': '', 'import': '', 'want_hide': self.want_hide,
+                    'want_show': self.want_show, 'want_import': self.want_import}
         with self._lock:
-            self._pending = (self.want_hide, self.want_show)
+            self._pending = (self.want_hide, self.want_show, self.want_import)
             self._rebind_result = None
             self._rebind_done.clear()
         user32.PostMessageW(self._hwnd_msg, WM_REBIND, 0, 0)
         if not self._rebind_done.wait(3.0):
-            return {'hide': self.hide_key, 'show': self.show_key,
+            return {'hide': self.hide_key, 'show': self.show_key, 'import': self.import_key,
                     'want_hide': self.want_hide, 'want_show': self.want_show,
-                    'error': '切换超时'}
+                    'want_import': self.want_import, 'error': '切换超时'}
         return self._rebind_result or {'hide': self.hide_key, 'show': self.show_key,
+                                       'import': self.import_key,
                                        'want_hide': self.want_hide,
-                                       'want_show': self.want_show}
+                                       'want_show': self.want_show,
+                                       'want_import': self.want_import}
 
     def suspend(self) -> dict:
         """录入新快捷键期间卸掉全局热键。
@@ -547,17 +544,19 @@ class WindowHooks:
                 elif hid == 2:
                     self.show()
                 elif hid == 3:
-                    self.import_requested = True
-                    self.import_from_hidden = self._hidden
-                    if self._hidden or user32.IsIconic(self._last_hwnd or 0):
+                    was_hidden = self._hidden or user32.IsIconic(self._last_hwnd or 0)
+                    self.import_from_hidden = was_hidden
+                    if was_hidden:
                         self.show()
-                    # 直接调前端，不等轮询（省 1.5-2 秒）
+                    # 直接调前端打开导入框（秒弹，不走轮询避免双重触发）
                     try:
                         import webview as _wv
                         if _wv.windows:
-                            _wv.windows[0].evaluate_js('openImportDialog && openImportDialog()')
+                            flag = 'true' if was_hidden else 'false'
+                            _wv.windows[0].evaluate_js(
+                                f'window._importFromHidden={flag};openImportDialog&&openImportDialog()')
                     except Exception:
-                        pass
+                        self.import_requested = True  # 回退：走轮询
                 return 0
             if msg == WM_TRAY:
                 ev = int(lparam) & 0xFFFF
@@ -568,7 +567,7 @@ class WindowHooks:
                 return 0
             if msg == WM_REBIND:
                 with self._lock:
-                    args = self._pending or (self.want_hide, self.want_show)
+                    args = self._pending or (self.want_hide, self.want_show, self.want_import)
                     self._rebind_result = self._apply_keys(*args)
                 self._rebind_done.set()
                 return 0
