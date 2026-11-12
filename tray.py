@@ -102,6 +102,15 @@ user32.CreatePopupMenu.restype = wintypes.HMENU
 user32.TrackPopupMenu.restype = ctypes.c_int
 user32.RegisterHotKey.restype = wintypes.BOOL
 user32.IsWindowVisible.restype = wintypes.BOOL
+user32.IsIconic.restype = wintypes.BOOL
+user32.IsIconic.argtypes = [wintypes.HWND]
+user32.GetWindowLongW.restype = ctypes.c_long
+user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.SetWindowLongW.restype = ctypes.c_long
+user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
+user32.SetWindowPos.restype = wintypes.BOOL
+user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int,
+                                ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
 user32.GetMessageW.restype = ctypes.c_int
 shell32.Shell_NotifyIconW.restype = wintypes.BOOL
 
@@ -199,6 +208,8 @@ class WindowHooks:
         self.want_show = show_hotkey or ''
         self.want_import = import_hotkey or ''
         self.import_requested = False  # 导入热键触发标记，前端轮询消费
+        self.import_from_hidden = False  # 导入前窗口是否处于隐藏状态
+        self._saved_style = 0        # 去边框前保存的窗口样式
         self.used_tray = False      # 隐藏键注册失败时才会挂托盘兜底
         self._hwnd_msg = None
         self._proc_ref = None
@@ -257,18 +268,45 @@ class WindowHooks:
         hwnd = self._last_hwnd or self._find_main()
         if not hwnd:
             return False
-        user32.ShowWindow(hwnd, SW_SHOW)
+        # 最小化时 SW_SHOW 无效，必须用 SW_RESTORE
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, SW_RESTORE)
+        else:
+            user32.ShowWindow(hwnd, SW_SHOW)
         if self._placement is not None:
-            # 用隐藏前的 placement 还原：位置、大小、最大化状态都和走之前一致
             pl = self._placement
             pl.length = ctypes.sizeof(WINDOWPLACEMENT)
             user32.SetWindowPlacement(hwnd, ctypes.byref(pl))
             self._placement = None
-        else:
-            user32.ShowWindow(hwnd, SW_RESTORE)
         user32.SetForegroundWindow(hwnd)
         self._hidden = False
         self._del_icon()
+        return True
+
+    def set_borderless(self) -> bool:
+        """去掉窗口标题栏和边框（用于独立弹窗模式）。"""
+        hwnd = self._last_hwnd or self._find_main()
+        if not hwnd:
+            return False
+        GWL_STYLE = -16
+        WS_CAPTION = 0x00C00000
+        WS_THICKFRAME = 0x00040000
+        style = user32.GetWindowLongW(hwnd, GWL_STYLE)
+        self._saved_style = style
+        user32.SetWindowLongW(hwnd, GWL_STYLE, style & ~(WS_CAPTION | WS_THICKFRAME))
+        user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0002 | 0x0001 | 0x0020)  # NOMOVE|NOSIZE|FRAMECHANGED
+        return True
+
+    def restore_border(self) -> bool:
+        """恢复窗口标题栏和边框。"""
+        hwnd = self._last_hwnd or self._find_main()
+        if not hwnd:
+            return False
+        GWL_STYLE = -16
+        if self._saved_style:
+            user32.SetWindowLongW(hwnd, GWL_STYLE, self._saved_style)
+            self._saved_style = 0
+            user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0002 | 0x0001 | 0x0020)
         return True
 
     def to_tray(self) -> bool:
@@ -495,8 +533,10 @@ class WindowHooks:
                 elif hid == 2:
                     self.show()
                 elif hid == 3:
-                    # 导入热键：弹出窗口并让前端打开导入框
                     self.import_requested = True
+                    self.import_from_hidden = self._hidden or bool(user32.IsIconic(self._last_hwnd or 0))
+                    if self.import_from_hidden:
+                        self.set_borderless()
                     self.show()
                 return 0
             if msg == WM_TRAY:

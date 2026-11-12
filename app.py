@@ -263,9 +263,11 @@ def make_handler(engine: Engine):
                 # 全局导入热键触发标记：读取后立即重置，前端轮询到就弹导入框
                 if HOOKS and HOOKS.import_requested:
                     data['import_requested'] = True
+                    data['import_from_hidden'] = bool(HOOKS.import_from_hidden)
                     HOOKS.import_requested = False
                 else:
                     data['import_requested'] = False
+                    data['import_from_hidden'] = False
                 return self._json(data)
             if path == '/api/browse':
                 target = (parse_qs(parsed.query).get('path') or [''])[0]
@@ -386,6 +388,8 @@ def make_handler(engine: Engine):
                         return self._json({'ok': HOOKS.hide()})
                     if action == 'show':
                         return self._json({'ok': HOOKS.show()})
+                    if action == 'restore-border':
+                        return self._json({'ok': HOOKS.restore_border()})
                     return self._json({'ok': False, 'error': 'bad action'}, 400)
                 if path == '/api/quit':
                     global CLOSE_CONFIRMED

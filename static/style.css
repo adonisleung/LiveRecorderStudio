@@ -553,6 +553,9 @@ td:last-child .link-btn+.link-btn{margin-left:2px}
   font-size:11px;color:var(--on-surface-variant);letter-spacing:.3px;background:var(--surface-c-lowest);
   user-select:none;cursor:pointer}
 .hotkey-badge:hover{border-color:var(--primary);color:var(--primary)}
+/* 从隐藏状态弹出导入框时：隐藏主体内容，只留弹窗（视觉上独立弹窗） */
+body.import-overlay .shell{visibility:hidden}
+body.import-overlay .modal{z-index:999}
 /* 确认删除等简单确认弹窗：收窄到 300px，取消在左、确认在右下角 */
 .modal-card.confirm{width:min(300px,92vw)}
 .modal-card.confirm .modal-head{padding:16px 20px 6px}

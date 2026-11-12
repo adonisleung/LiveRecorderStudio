@@ -7,7 +7,7 @@ let hoverPause = false;        // 鼠标悬停表格时暂停重建，避免行�
 let pendingRebuild = false;    // 悬停/节流期间攒下的重建任务
 let lastRebuild = 0;           // 上次整表重建时刻（重建节流）
 let lastLogRebuild = 0;        // 上次日志重建时刻（日志节流）
-let drawerId = null, lastState = null;
+let drawerId = null, lastState = null, importFromHidden = false;
 const STATUS = {idle:'待检查', checking:'检测中', offline:'未开播', live:'直播中', recording:'录制中', error:'异常'};
 
 async function api(path, opts = {}) {
@@ -108,8 +108,9 @@ function roomRow(r) {
 function render(s) {
   lastState = s;
   // 全局导入热键触发（窗口隐藏时也能弹出）
-  if (s.import_requested && $('#modal').classList.contains('hidden')) {
-    openImportDialog();
+  if (s.import_requested) {
+    importFromHidden = !!s.import_from_hidden;
+    if ($('#modal').classList.contains('hidden')) openImportDialog();
     return;
   }
   const cfg = s.config || {};
@@ -289,9 +290,16 @@ function confirmDialog({title, text, okText = '确认', danger = true, onOk}) {
 }
 function closeModal() {
   const card = document.querySelector('.modal-card');
-  if (card) card.classList.remove('narrow', 'settings', 'confirm', 'hide-close');
+  if (card) card.classList.remove('narrow', 'settings', 'confirm', 'hide-close', 'import-dialog');
   $('#modal').classList.add('hidden');
+  document.body.classList.remove('import-overlay');
   resumeHotkeys();
+  if (importFromHidden) {
+    importFromHidden = false;
+    // 恢复边框并隐藏回去
+    post('/api/window', {action: 'restore-border'}).catch(() => {});
+    post('/api/window', {action: 'hide'}).catch(() => {});
+  }
 }
 
 /* ---------- 详情抽屉 ---------- */
@@ -824,12 +832,14 @@ function confirmRemove(id) {
 /* ---------- 弹窗（导入 / 设置 / 确认） ---------- */
 let modalSubmit = null;
 function openModal(title, bodyHtml, okText, onSubmit, footExtra = '') {
-  // 每次打开先清掉上一次可能留下的弹窗样式标记，避免串到别的弹窗
   const card = document.querySelector('.modal-card');
-  if (card) card.classList.remove('narrow', 'hide-close', 'confirm', 'settings');
+  if (card) {
+    card.classList.remove('narrow', 'hide-close', 'confirm', 'settings', 'import-dialog');
+    // 重建头部（openImportDialog 可能替换过 innerHTML，#modalTitle 会被销毁）
+    card.querySelector('.modal-head').innerHTML = '<h3 id="modalTitle"></h3>';
+  }
   $('#modalTitle').textContent = title;
   $('#modalBody').innerHTML = bodyHtml;
-  // footExtra 放在底栏左侧，和取消/导入同一行，不再另行占一行
   $('#modalFoot').innerHTML = `${footExtra ? `<div class="foot-left">${footExtra}</div>` : ''}
     <button class="btn ghost" data-close="1">取消</button>
     <button class="btn primary" id="modalOk">${esc(okText)}</button>`;
@@ -863,43 +873,56 @@ document.addEventListener('keydown', (e) => {
 });
 
 function openImportDialog() {
-  const cfg = lastState?.config || {};
-  const importKey = cfg.hotkey_import || 'Alt+1';
-  openModal('导入', `
-  <textarea id="importText" placeholder="支持批量导入&#10;一行一个直播间地址，例如：&#10;https://live.douyin.com/745964462470&#10;https://live.kuaishou.com/u/sunni777&#10;demo://离线演示"></textarea>
-`,
-  '导入', null, '');
-  // 窄版 + 自定义头部 + 底部按钮两端对齐
-  const card = document.querySelector('.modal-card');
-  card.classList.add('narrow', 'import-dialog');
-  // 头部：导入标题 + 可改快捷键 + 粘贴按钮
-  card.querySelector('.modal-head').innerHTML = `
-    <h3>导入</h3>
-    <div class="import-head-right">
-      <input class="input keycap" id="importHotkey" readonly value="${esc(importKey)}" title="点击后按新组合键更改快捷键">
-      <button class="btn small tonal" id="btnPasteIn" title="粘贴剪贴板内容">粘贴</button>
-    </div>`;
-  // 底栏：导出列表在左，取消+导入在右下角
-  $('#modalFoot').innerHTML = `
-    <div class="foot-left"><button class="btn small ghost" id="btnExport">导出列表</button></div>
-    <div class="foot-right">
-      <button class="btn ghost" data-close="1">取消</button>
-      <button class="btn primary" id="modalOk">导入</button>
-    </div>`;
-  $('#modalOk').onclick = async () => {
-    const text = $('#importText').value;
-    if (!text.trim()) return closeModal();
-    const r = await post('/api/rooms', {text});
-    closeModal();
-    const bits = [`新增 ${r.added} 个`];
-    if (r.skipped) bits.push(`重复 ${r.skipped} 个`);
-    if (r.ignored) bits.push(`无地址 ${r.ignored} 行`);
-    toast(bits.join(' · '));
-    lastRoomSig = ''; refresh();
-  };
-  $('#btnExport').onclick = () => showExportModal();
-  $('#btnPasteIn').onclick = () => pasteInto($('#importText'));
-  bindImportHotkey();
+  try {
+    const cfg = lastState?.config || {};
+    const importKey = cfg.hotkey_import || 'Alt+1';
+    const card = document.querySelector('.modal-card');
+    if (!card) return;
+    card.classList.remove('narrow', 'hide-close', 'confirm', 'settings');
+    card.classList.add('narrow', 'import-dialog');
+    // 头部：标题 + 可自定义快捷键 + 粘贴
+    card.querySelector('.modal-head').innerHTML = `
+      <h3>导入</h3>
+      <div class="import-head-right">
+        <input class="input keycap" id="importHotkey" readonly value="${esc(importKey)}" title="点击后按新组合键更改">
+        <button class="btn small tonal" id="btnPasteIn" title="粘贴剪贴板内容">粘贴</button>
+      </div>`;
+    // 主体
+    $('#modalBody').innerHTML = `
+      <textarea id="importText" placeholder="支持批量导入&#10;一行一个直播间地址，例如：&#10;https://live.douyin.com/745964462470&#10;https://live.kuaishou.com/u/sunni777&#10;demo://离线演示"></textarea>`;
+    // 底栏：导出列表左，取消+导入右下
+    $('#modalFoot').innerHTML = `
+      <div class="foot-left"><button class="btn small ghost" id="btnExport">导出列表</button></div>
+      <div class="foot-right">
+        <button class="btn ghost" data-close="1">取消</button>
+        <button class="btn primary" id="modalOk">导入</button>
+      </div>`;
+    $('#modal').classList.remove('hidden');
+    // 从隐藏状态弹出：隐藏主体内容，只显示导入框（视觉上独立弹窗）
+    if (importFromHidden) document.body.classList.add('import-overlay');
+    // 事件绑定
+    $('#modalOk').onclick = async () => {
+      const text = ($('#importText') || {}).value || '';
+      if (!text.trim()) { closeModal(); return; }
+      try {
+        const r = await post('/api/rooms', {text});
+        closeModal();
+        const bits = [`新增 ${r.added} 个`];
+        if (r.skipped) bits.push(`重复 ${r.skipped} 个`);
+        if (r.ignored) bits.push(`无地址 ${r.ignored} 行`);
+        toast(bits.join(' · '));
+        lastRoomSig = ''; refresh();
+      } catch (e) { toast(e.message); }
+    };
+    const expBtn = $('#btnExport');
+    if (expBtn) expBtn.onclick = () => showExportModal();
+    const pasteBtn = $('#btnPasteIn');
+    if (pasteBtn) pasteBtn.onclick = () => pasteInto($('#importText'));
+    bindImportHotkey();
+  } catch (e) {
+    console.error('openImportDialog error:', e);
+    toast('打开导入框失败：' + e.message);
+  }
 }
 
 function bindImportHotkey() {
