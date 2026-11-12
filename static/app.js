@@ -670,6 +670,15 @@ function applySide() {
   }
 }
 $('#btnSide').onclick = () => { sideHidden = !sideHidden; applySide(); };
+
+// 点侧栏外部空白处自动收起（按钮和侧栏本身除外）
+document.addEventListener('click', (e) => {
+  if (sideHidden) return;
+  if (e.target.closest('.side') || e.target.closest('#btnSide')) return;
+  if (e.target.closest('.modal')) return; // 弹窗内点击不触发
+  sideHidden = true;
+  applySide();
+});
 // 窗口尺寸变化会改变顶栏行数（72px ↔ 折行），侧栏起点要跟着重算
 window.addEventListener('resize', () => { if (!sideHidden) applySide(); });
 applySide();
