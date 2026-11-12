@@ -548,9 +548,7 @@ class WindowHooks:
                     self.show()
                 elif hid == 3:
                     self.import_requested = True
-                    self.import_from_hidden = self._hidden or bool(user32.IsIconic(self._last_hwnd or 0))
-                    if self.import_from_hidden:
-                        self.set_borderless()
+                    self.import_from_hidden = self._hidden
                     self.show()
                 return 0
             if msg == WM_TRAY:

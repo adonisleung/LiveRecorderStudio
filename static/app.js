@@ -292,12 +292,9 @@ function closeModal() {
   const card = document.querySelector('.modal-card');
   if (card) card.classList.remove('narrow', 'settings', 'confirm', 'hide-close', 'import-dialog');
   $('#modal').classList.add('hidden');
-  document.body.classList.remove('import-overlay');
   resumeHotkeys();
   if (importFromHidden) {
     importFromHidden = false;
-    // 恢复边框并隐藏回去
-    post('/api/window', {action: 'restore-border'}).catch(() => {});
     post('/api/window', {action: 'hide'}).catch(() => {});
   }
 }
@@ -898,8 +895,6 @@ function openImportDialog() {
         <button class="btn primary" id="modalOk">导入</button>
       </div>`;
     $('#modal').classList.remove('hidden');
-    // 从隐藏状态弹出：隐藏主体内容，只显示导入框（视觉上独立弹窗）
-    if (importFromHidden) document.body.classList.add('import-overlay');
     // 事件绑定
     $('#modalOk').onclick = async () => {
       const text = ($('#importText') || {}).value || '';
