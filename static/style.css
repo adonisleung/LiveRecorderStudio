@@ -931,20 +931,14 @@ html.glass[data-theme="light"]{
   --glass-card-hover:rgba(255,255,255,.75);
 }
 
-/* 环境光斑：圆心放在画面内，让左上/右下真正有颜色，中间淡出 */
-html.glass body::before{
-  content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
-  background:
-    radial-gradient(52% 46% at 6% 4%, rgba(77,224,203,.46), transparent 68%),
-    radial-gradient(50% 44% at 94% 96%, rgba(96,140,255,.46), transparent 68%),
-    radial-gradient(32% 28% at 84% 8%, rgba(186,120,255,.26), transparent 70%);
-}
-html.glass[data-theme="light"] body::before{opacity:.55}
+/* 背景保持纯净：不加彩色光斑。
+   之前在左上/右下铺青蓝渐晕，观感像"染色"而不是玻璃，已移除。 */
+html.glass,html.glass body{background:var(--surface)}
 html.glass .shell{position:relative;z-index:1}
 
-/* 顶栏：背后是固定的页面底色，blur 结果可复用，不随列表滚动重算 */
+/* 顶栏：和面板同一层底色，不再用更深的渐变（那会在左上角压出一块黑） */
 html.glass .topbar{
-  background:linear-gradient(180deg,var(--glass-elev),var(--glass-panel));
+  background:var(--glass-panel);
   backdrop-filter:blur(18px) saturate(150%);
   -webkit-backdrop-filter:blur(18px) saturate(150%);
 }
@@ -956,9 +950,15 @@ html.glass .panel{
   box-shadow:var(--glass-shadow),var(--glass-hi),0 0 0 1px var(--glass-outline);
 }
 
+/* 左上角 logo 是 256×256 的应用图标，方块区域是不透明黑（png 里 alpha 只是外形）。
+   压在能透光的顶栏上就显得像贴了块黑，这里压低存在感 + 加一圈高光边做成小徽章。 */
+html.glass .mark{
+  opacity:.82;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.16);
+}
+
 /* 侧栏浮在列表上方，日志滚动频率低，可以开轻模糊 */
-html.glass .side{
-  background:var(--glass-panel);
+html.glass .side{  background:var(--glass-panel);
   backdrop-filter:blur(14px) saturate(140%);
   -webkit-backdrop-filter:blur(14px) saturate(140%);
 }
