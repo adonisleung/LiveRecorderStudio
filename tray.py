@@ -754,6 +754,7 @@ class WindowHooks:
         try:
             if msg == WM_HOTKEY:
                 hid = int(wparam)
+                _log('WM_HOTKEY id=%d' % hid)   # 先记原始消息，确认到底是哪个键
                 if hid == 1:
                     self.hide()
                 elif hid == 2:
