@@ -883,8 +883,11 @@ def _open_window(url: str) -> bool:
             print(f'热键: 隐藏 {HOOKS.hide_key or "无"} / 还原 {HOOKS.show_key or "无"} / 导入 {HOOKS.import_key or "无"}')
         except Exception as e:
             _quit_trace(f'hooks failed: {type(e).__name__}: {e}')
-        # 禁用 WebView2 GPU 渲染：部分显卡驱动下 GPU 加速导致整个页面黑屏
-        os.environ.setdefault('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', '--disable-gpu')
+        # 注意：这里原来想用 WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS 禁 GPU / 禁后台节流，
+        # 但该环境变量对 pywebview 无效 —— 它在 EdgeChrome.__init__ 里显式给
+        # AdditionalBrowserArguments 赋了值，显式值优先，环境变量被整体忽略（已用
+        # 子进程命令行核实）。后台节流的绕法放在 tray._push_import_js()：
+        # 热键后直接用 IPC 唤起前端，不依赖会被节流的页面定时器。
         webview.start(gui='edgechromium', icon=str(ICON) if ICON else None)
         if HOOKS:
             HOOKS.stop()

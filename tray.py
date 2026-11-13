@@ -13,6 +13,7 @@ from __future__ import annotations
 import ctypes
 import re
 import threading
+import time
 from ctypes import wintypes
 
 user32 = ctypes.windll.user32
@@ -233,6 +234,7 @@ class WindowHooks:
         self._last_hwnd = 0        # hide() 记下的真实窗口句柄，show() 直接用
         self._icon = None
         self._icon_added = False
+        self._js_pushing = 0.0      # 上次 JS 推送的开始时刻，0 表示空闲
         self._thread = None
         self._ready = threading.Event()
         self._lock = threading.RLock()
@@ -324,6 +326,43 @@ class WindowHooks:
                 user32.SetForegroundWindow(hwnd)
             except Exception:
                 pass
+
+    def _push_import_js(self) -> None:
+        """热键后从**独立线程**异步唤起前端导入框。
+
+        为什么不在 _wndproc 里直接调 evaluate_js：pywebview 的 evaluate_js 走
+        WinForms 的 Invoke + 信号量等待，在消息循环线程里调用就是「自己等自己」，
+        窗口最小化时渲染进程不响应，直接把界面锁死。
+        放到独立线程后消息循环始终空闲，Invoke 能被正常处理，只阻塞这个线程。
+
+        为什么还要推这一下：前端轮询在窗口不在前台时会被 Chromium 节流到
+        每分钟一次（已用 WebView2 参数压制，但参数万一没生效还有这条兜底），
+        推送是 IPC 调用，不依赖页面定时器，窗口一恢复就能立刻执行。
+        """
+        now = time.time()
+        # 上一次推送还在跑就跳过；但超过 5 秒仍未返回说明渲染进程卡住了，
+        # 视为僵死重新放行，否则一次卡死会让之后所有热键都退化成轮询。
+        if self._js_pushing and now - self._js_pushing < 5.0:
+            return
+        self._js_pushing = now
+        from_hidden = 'true' if self.import_from_hidden else 'false'
+
+        def _run():
+            try:
+                time.sleep(0.20)        # 等 show() 把窗口恢复完，别在最小化态下发脚本
+                import webview as _wv
+                windows = getattr(_wv, 'windows', None) or []
+                if not windows:
+                    return
+                windows[0].evaluate_js(
+                    f'window._importFromHidden={from_hidden};'
+                    'try{openImportDialog&&openImportDialog()}catch(e){};1')
+            except Exception:
+                pass                    # 推不动就走轮询兜底，绝不把异常抛回消息循环
+            finally:
+                self._js_pushing = 0.0
+
+        threading.Thread(target=_run, daemon=True, name='lrs-import-js').start()
 
     def set_borderless(self) -> bool:
         """去掉标题栏并缩成小弹窗（居中显示），视觉上独立于主窗口。"""
@@ -595,6 +634,8 @@ class WindowHooks:
                     # 不管是否隐藏都拉到前台：窗口可见但被别的程序挡住时，
                     # 不置前前端就收不到 focus/visibilitychange，只能等轮询或用户点一下。
                     self.show()
+                    # 独立线程异步推一次，绕开「后台轮询被节流、必须点一下才消费」的问题
+                    self._push_import_js()
                 return 0
             if msg == WM_TRAY:
                 ev = int(lparam) & 0xFFFF
