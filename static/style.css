@@ -338,7 +338,10 @@ td:last-child .link-btn+.link-btn{margin-left:2px}
    （头部 innerHTML 被覆盖、背景能滚动、z-index 打架）都源于手写遮罩。 */
 .modal{position:fixed;inset:0;margin:0;padding:0;border:0;
   width:100%;height:100%;max-width:none;max-height:none;
-  background:transparent;display:grid;place-items:center;overflow:hidden}
+  background:transparent;display:grid;place-items:center;overflow:hidden;
+  /* dialog 的 UA 样式是 color:canvastext，会盖掉从 body 继承的文字颜色，
+     不显式给的话深色主题下标题会变成黑字 */
+  color:var(--on-surface)}
 .modal:not([open]){display:none}
 .modal::backdrop{background:var(--scrim);backdrop-filter:blur(2px);overscroll-behavior:contain}
 /* 弹窗打开时锁住背后页面的滚动（showModal 只让背景 inert，不禁滚动） */
