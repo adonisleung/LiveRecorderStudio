@@ -152,6 +152,10 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke
 }
 .brand-sub{font-size:11px;color:var(--on-surface-variant);letter-spacing:.9px;margin-top:1px}
 .topbar-right{display:flex;align-items:center;gap:9px}
+/* 按功能分组：目录/设置 | 主题/侧栏 | 启动监测。
+   组内 9px，组间多让一点，否则一排按钮会粘成一片看不出层次。 */
+#btnTheme{margin-left:5px}
+#btnEngine{margin-left:8px}
 .chip{font-size:12px;color:var(--on-surface-variant);border:1px solid var(--outline-variant);
   border-radius:var(--shape-sm);padding:5px 12px;letter-spacing:.3px;white-space:nowrap;flex:none}
 .chip.on{color:var(--primary);border-color:rgba(77,224,203,.35);background:var(--accent-dim)}
@@ -256,7 +260,7 @@ tbody tr:last-child td{border-bottom:0}
 .mono{font:12px var(--mono);color:var(--on-surface-variant)}
 .dur{font-variant-numeric:tabular-nums;color:var(--on-surface)}
 td .mono.dur{color:var(--on-surface)}
-.row-actions{display:flex;align-items:center;gap:5px}
+.row-actions{display:flex;align-items:center;gap:7px}
 td:last-child{white-space:nowrap}
 
 /* 画质 / 时长两列居中 */
@@ -744,7 +748,7 @@ tbody tr:first-child .tip-wrap:hover::after{transform:translate(-50%,0)}
   82%,100%{transform:translateX(calc(-1 * var(--nm-shift,0px)))}
 }
 /* 三个操作图标：贴右整齐排列，组内不留缝，靠图标自身的可点区域撑开间距 */
-.table-wrap.two-col .row-actions{gap:0;padding-left:3px}
+.table-wrap.two-col .row-actions{gap:3px;padding-left:3px}
 .table-wrap.two-col .icon-act{width:24px;height:24px;padding:4px;border-radius:var(--shape-xs)}
 .table-wrap.two-col .icon-act::before{inset:-2px}
 .table-wrap.two-col .icon-act svg{width:14px;height:14px}
