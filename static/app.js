@@ -363,7 +363,7 @@ function folderPicker(startPath, onPick) {
 /* ---------- 二次确认 ---------- */
 function confirmDialog({title, text, okText = '确认', danger = true, onOk}) {
   const card = $('#modal .modal-card');
-  card.classList.remove('narrow', 'settings', 'hide-close');
+  card.classList.remove('narrow', 'settings', 'hide-close', 'import-dialog');
   card.classList.add('confirm');
   const foot = $('#modalFoot');
   // 取消在左、确认在右下角，两端分开
@@ -371,7 +371,7 @@ function confirmDialog({title, text, okText = '确认', danger = true, onOk}) {
       <button class="btn ghost" data-close="1">取消</button>
     </div>
     <button class="btn ${danger ? 'danger' : 'primary'}" id="confirmOk">${esc(okText)}</button>`;
-  $('#modalTitle').textContent = title;
+  setModalHead(title, false);
   $('#modalBody').innerHTML = `<p class="confirm-text">${text}</p>`;
   showModalEl();
   $('#confirmOk').onclick = async () => {
@@ -858,8 +858,8 @@ window.onHostClose = () => {
   const showKey = lastState?.hotkey_show || 'Alt+F2';
   // 清理旧弹窗残留的样式类，避免串到这个弹窗（"偶尔正常"的根因）
   const card = document.querySelector('.modal-card');
-  if (card) { card.classList.remove('narrow', 'settings', 'hide-close'); card.classList.add('confirm'); }
-  $('#modalTitle').textContent = '关闭窗口';
+  if (card) { card.classList.remove('narrow', 'settings', 'hide-close', 'import-dialog'); card.classList.add('confirm'); }
+  setModalHead('关闭窗口', false);
   $('#modalBody').innerHTML = `<p class="confirm-text">
     缩到托盘：继续在后台监测与录制，点托盘图标或按 <b>${esc(showKey)}</b> 叫回窗口。<br>
     退出程序：先收尾正在录制的文件再关闭，之后需要重新启动。</p>`;
@@ -936,14 +936,25 @@ function confirmRemove(id) {
 
 /* ---------- 弹窗（导入 / 设置 / 确认） ---------- */
 let modalSubmit = null;
+
+/* 弹窗头部结构固定：#modalTitle + 可选导入工具条 + 关闭按钮。
+   以前 openImportDialog 直接把整个 .modal-head 的 innerHTML 换掉，
+   #modalTitle 和 #modalClose 被销毁，之后任何弹窗（包括关闭确认框）
+   一设置标题就抛 null 异常 —— 表现就是「点 × 没反应、退出时窗口关不掉」。
+   现在只改文本和显隐，绝不重建结构。 */
+function setModalHead(title, importMode) {
+  const t = $('#modalTitle');
+  if (t) t.textContent = title;
+  const r = $('#importHeadRight');
+  if (r) r.hidden = !importMode;
+}
+
 function openModal(title, bodyHtml, okText, onSubmit, footExtra = '') {
   const card = document.querySelector('.modal-card');
   if (card) {
     card.classList.remove('narrow', 'hide-close', 'confirm', 'settings', 'import-dialog');
-    // 重建头部（openImportDialog 可能替换过 innerHTML，#modalTitle 会被销毁）
-    card.querySelector('.modal-head').innerHTML = '<h3 id="modalTitle"></h3>';
   }
-  $('#modalTitle').textContent = title;
+  setModalHead(title, false);
   $('#modalBody').innerHTML = bodyHtml;
   $('#modalFoot').innerHTML = `${footExtra ? `<div class="foot-left">${footExtra}</div>` : ''}
     <button class="btn ghost" data-close="1">取消</button>
@@ -986,13 +997,10 @@ function openImportDialog() {
     if (!card) return;
     card.classList.remove('narrow', 'hide-close', 'confirm', 'settings');
     card.classList.add('narrow', 'import-dialog');
-    // 头部：标题 + 可自定义快捷键 + 粘贴
-    card.querySelector('.modal-head').innerHTML = `
-      <h3>导入</h3>
-      <div class="import-head-right">
-        <input class="input keycap" id="importHotkey" readonly value="${esc(importKey)}" title="点击后按新组合键更改">
-        <button class="btn small tonal" id="btnPasteIn" title="粘贴剪贴板内容">粘贴</button>
-      </div>`;
+    // 头部：只换标题文字 + 显示导入工具条，结构不动（见 setModalHead 注释）
+    setModalHead('导入', true);
+    const hkEl = $('#importHotkey');
+    if (hkEl) hkEl.value = importKey;
     // 主体
     $('#modalBody').innerHTML = `
       <textarea id="importText" placeholder="支持批量导入&#10;一行一个直播间地址，例如：&#10;https://live.douyin.com/745964462470&#10;https://live.kuaishou.com/u/sunni777&#10;demo://离线演示"></textarea>`;
@@ -1052,9 +1060,11 @@ function hotkeyOpenImport(fromHidden) {
 function bindImportHotkey() {
   const el = $('#importHotkey');
   if (!el) return;
-  el.addEventListener('focus', () => { suspendHotkeys(); });
-  el.addEventListener('blur', () => { resumeHotkeys(); });
-  el.addEventListener('keydown', (e) => {
+  // 用 onXxx 覆盖赋值而不是 addEventListener：快捷键输入框现在固定在 DOM 里，
+  // 每打开一次导入框就会调用这里，addEventListener 会不断累积监听器。
+  el.onfocus = () => { suspendHotkeys(); };
+  el.onblur = () => { resumeHotkeys(); };
+  el.onkeydown = (e) => {
     e.preventDefault();
     if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
     const parts = [];
@@ -1074,7 +1084,7 @@ function bindImportHotkey() {
       if (lastState?.config) lastState.config.hotkey_import = combo;
       toast(`导入快捷键已改为 ${combo}`);
     });
-  });
+  };
 }
 
 /* ---------- 文本框粘贴/右键菜单 ----------
