@@ -143,7 +143,19 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke
 .topbar{height:72px;display:flex;align-items:center;justify-content:space-between;
   border-bottom:1px solid var(--outline-variant);gap:14px}
 .brand{display:flex;align-items:center;gap:12px}
-.mark{width:36px;height:36px;border-radius:var(--shape-md);display:block;flex:none}
+/* 品牌标记用 CSS 画，不再用 icon.png：
+   那张 256x256 的图内部是**不透明黑底方块**，缩到 36px 就是一个黑方框，
+   放在半透明顶栏上尤其突兀（就是「左上角有个矩形暗框」）。 */
+.mark{width:36px;height:36px;border-radius:var(--shape-md);display:block;flex:none;
+  background:
+    radial-gradient(circle at 50% 50%, #4de0cb 0 5px, rgba(77,224,203,.30) 5.5px, transparent 9px),
+    linear-gradient(150deg, #1b2229, #0f1317);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
+[data-theme="light"] .mark{
+  background:
+    radial-gradient(circle at 50% 50%, #17b79f 0 5px, rgba(23,183,159,.28) 5.5px, transparent 9px),
+    linear-gradient(150deg, #e9f4f0, #d3e6df);
+  box-shadow:inset 0 0 0 1px rgba(12,32,27,.10)}
 .brand-name{font-size:15px;letter-spacing:.4px;font-weight:500}
 .brand-name b{color:var(--primary);font-weight:600}
 /* 监测运行中：标题呼吸闪动代替文字标签 */
@@ -174,7 +186,9 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke
 .btn.tonal{background:var(--secondary-container);color:var(--on-secondary-container)}
 .btn.small{height:34px;padding:0 14px;font-size:12.5px}
 .btn.tiny{height:28px;padding:0 11px;font-size:11.5px}
-.btn.icon-only{width:36px;padding:0;justify-content:center}
+/* 纯图标按钮必须是正方形才可能成为圆形。用 aspect-ratio 跟随高度，
+   窄窗口断点会把按钮高度从 40px 压到 34px，写死宽度就会又变成椭圆/胶囊。 */
+.btn.icon-only{aspect-ratio:1;padding:0;justify-content:center;align-items:center;flex:none}
 .btn .dot{width:8px;height:8px;border-radius:50%;background:currentColor;opacity:.9}
 .btn.danger{background:var(--error);color:var(--on-error);box-shadow:var(--e1)}
 .btn.danger:hover{background:#ffc4bd}
@@ -679,6 +693,8 @@ tbody tr:first-child .tip-wrap:hover::after{transform:translate(-50%,0)}
   .brand-sub{display:none}
   .topbar-right{flex-wrap:wrap}
   .topbar-right .btn{padding:0 10px;height:34px;font-size:12px}
+  /* 纯图标按钮在同高度下保持正方形，否则 34 高 + 36 宽会变成圆角矩形 */
+  .topbar-right .btn.icon-only{width:34px;height:34px;padding:0}
   .grid{padding:12px 0}
   .side{flex-direction:column}
   .stats{grid-template-columns:1fr 1fr}
@@ -966,10 +982,7 @@ html.glass .panel{
 
 /* 左上角 logo 是 256×256 的应用图标，方块区域是不透明黑（png 里 alpha 只是外形）。
    压在能透光的顶栏上就显得像贴了块黑，这里压低存在感 + 加一圈高光边做成小徽章。 */
-html.glass .mark{
-  opacity:.82;
-  box-shadow:inset 0 0 0 1px rgba(255,255,255,.16);
-}
+html.glass .mark{box-shadow:inset 0 0 0 1px rgba(255,255,255,.10)}
 
 /* 侧栏浮在列表上方，日志滚动频率低，可以开轻模糊 */
 html.glass .side{  background:var(--glass-panel);
