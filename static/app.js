@@ -147,13 +147,9 @@ function render(s) {
   const usableH = Math.max(0, availH - 26);
   const MIN_ROWS = Math.max(2, Math.floor(usableH / rowPitch)) * (twoCol ? 2 : 1);
   if (wrapEl) wrapEl.classList.toggle('folded', !showAllRooms);   // 折叠态不预留滚动条空间
-  const activeRooms = all.filter(r => r.status !== 'offline');
-  const rooms = showAllRooms
-    ? all
-    : (activeRooms.length >= MIN_ROWS
-        ? activeRooms
-        : activeRooms.concat(all.filter(r => r.status === 'offline')
-            .slice(0, MIN_ROWS - activeRooms.length)));
+  // 列表已按「录制中→直播中→检测中→异常→未开播」排序，直接截前 N 个就够铺满。
+  // 不能按 status==='offline' 过滤：刚启动时房间全是 idle，过滤不掉，1300 行会全渲染。
+  const rooms = showAllRooms ? all : all.slice(0, MIN_ROWS);
   const foldedCount = all.length - rooms.length;
   // 行级增量更新：只替换真正变化的行，不再每 1.2 秒把上千行 innerHTML 重解析。
   // 整表重建一次要几百毫秒，跑十几小时后渲染进程会涨到 600MB+ 并卡死。
@@ -212,14 +208,14 @@ function render(s) {
     $('#empty').classList.toggle('hidden', all.length > 0);
   }
   const onAir = rooms.filter(r => r.status === 'recording' || r.status === 'live').length;
-  const hasOffline = all.some(r => r.status === 'offline');
-  // 折叠开关做成纯图标，排在布局按钮左边；没有未开播房间时整颗按钮隐藏
+  // 只要房间数超过一屏就该能折叠——不依赖有没有 offline（刚启动全是 idle）
+  const canFold = all.length > MIN_ROWS;
   const foldBtn = $('#btnFold');
-  foldBtn.hidden = !hasOffline;
+  foldBtn.hidden = !canFold;
   foldBtn.innerHTML = showAllRooms ? ICON.eyeOff : ICON.eye;
   foldBtn.dataset.tip = showAllRooms
-    ? '只看活跃（收起未开播）'
-    : `显示全部${foldedCount ? `（${foldedCount} 个未开播）` : ''}`;
+    ? '收起，只看前面这些'
+    : `显示全部（当前收起 ${foldedCount} 个）`;
   // 折叠数量不再写进提示条，只在折叠图标的悬停提示里出现
   $('#roomsHint').innerHTML =
     `${s.stats.total} 个房间 · ${s.stats.enabled} 个启用`
