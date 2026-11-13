@@ -125,10 +125,12 @@ body{margin:0;background:var(--surface);color:var(--on-surface);
 button,input,select,textarea{font:inherit;color:inherit}
 svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 
-/* 深色滚动条：默认隐形（不占视觉），鼠标靠近容器右/下边缘或滚动时淡入 */
-::-webkit-scrollbar{width:10px;height:10px}
+/* 深色滚动条：细、默认隐形，滚动时淡入。
+   宽度固定且两侧都预留（见 .table-wrap 的 scrollbar-gutter），
+   这样双列布局左右边距对称，不会因为滚动条把第二列挤窄。 */
+::-webkit-scrollbar{width:6px;height:6px}
 ::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:transparent;border-radius:999px;border:2px solid transparent;
+::-webkit-scrollbar-thumb{background:transparent;border-radius:999px;border:1px solid transparent;
   background-clip:padding-box;transition:background .18s ease}
 .sb-on::-webkit-scrollbar-thumb{background:#39424b;background-clip:padding-box}
 .sb-on::-webkit-scrollbar-thumb:hover{background:#55606b;background-clip:padding-box}
@@ -225,7 +227,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke
 
 /* ---------------- table ---------------- */
 .search{width:190px;font-size:12.5px}
-.table-wrap{overflow:auto;flex:1;position:relative}
+.table-wrap{overflow:auto;flex:1;position:relative;scrollbar-gutter:stable both-edges}
 table{width:100%;border-collapse:collapse;font-size:13px;min-width:820px}
 th{text-align:left;font-size:11px;color:var(--on-surface-variant);font-weight:500;letter-spacing:.8px;
   white-space:nowrap;padding:11px 14px;border-bottom:1px solid var(--outline-variant);
