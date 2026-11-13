@@ -1359,10 +1359,9 @@ function pollDelay() {
   // 隐藏时也保持 2 秒：热键唤回窗口后要在 2 秒内拿到 import_requested。
   // 之前设 5 秒，加上窗口恢复时 visibleitychange 不一定触发，就成了"按了没反应"。
   if (document.hidden) return 2000;
-  const rooms = (lastState && lastState.rooms) || [];
-  const busy = rooms.some(r => r.status === 'recording' || r.status === 'live');
-  // 可见且空闲时也必须保持较短周期：全局导入热键走的就是这条轮询（2.5s 内必弹）
-  return busy ? 1500 : 2500;
+  // 可见时统一 1.5s：全局导入热键最终靠这条轮询兜底，间隔太长会明显慢半拍。
+  // gzip 后一次约 50KB、本地回环，这点开销远小于"按了没反应"的体验损失。
+  return 1500;
 }
 function schedulePoll(ms) {
   clearTimeout(pollTimer);

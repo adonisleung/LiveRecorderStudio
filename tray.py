@@ -100,6 +100,18 @@ user32.LoadImageW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UIN
                               ctypes.c_int, ctypes.c_int, wintypes.UINT]
 user32.CreatePopupMenu.restype = wintypes.HMENU
 user32.TrackPopupMenu.restype = ctypes.c_int
+# 窗口置前（强制前台）用到的几个 API：64 位下必须显式声明 restype/argtypes，
+# 否则 HWND 会被当成 int 截断，AttachThreadInput 拿到的线程 ID 也是错的。
+user32.GetForegroundWindow.restype = wintypes.HWND
+user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+user32.AttachThreadInput.restype = wintypes.BOOL
+user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+user32.BringWindowToTop.restype = wintypes.BOOL
+user32.BringWindowToTop.argtypes = [wintypes.HWND]
+user32.SetForegroundWindow.restype = wintypes.BOOL
+user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+kernel32.GetCurrentThreadId.restype = wintypes.DWORD
 user32.RegisterHotKey.restype = wintypes.BOOL
 user32.IsWindowVisible.restype = wintypes.BOOL
 user32.IsIconic.restype = wintypes.BOOL
@@ -279,10 +291,39 @@ class WindowHooks:
             user32.ShowWindow(hwnd, SW_SHOW)
         else:
             user32.ShowWindow(hwnd, SW_SHOW)
-        user32.SetForegroundWindow(hwnd)
+        self._force_foreground(hwnd)
         self._hidden = False
         self._del_icon()
         return True
+
+    @staticmethod
+    def _force_foreground(hwnd) -> None:
+        """把窗口拉到前台。
+
+        直接调 SetForegroundWindow 在非前台进程里会被 Windows 的前台锁拒绝
+        （返回 0、窗口不动），表现就是「按了热键没反应，点一下窗口才出现」。
+        标准解法：临时把自己 attach 到当前前台窗口所属线程，置前后再 detach。
+        """
+        try:
+            fg = user32.GetForegroundWindow()
+            if fg == hwnd:
+                return
+            cur_tid = kernel32.GetCurrentThreadId()
+            fg_tid = user32.GetWindowThreadProcessId(fg, None) if fg else 0
+            attached = False
+            if fg_tid and fg_tid != cur_tid:
+                attached = bool(user32.AttachThreadInput(cur_tid, fg_tid, True))
+            try:
+                user32.SetForegroundWindow(hwnd)
+                user32.BringWindowToTop(hwnd)
+            finally:
+                if attached:
+                    user32.AttachThreadInput(cur_tid, fg_tid, False)
+        except Exception:
+            try:
+                user32.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
 
     def set_borderless(self) -> bool:
         """去掉标题栏并缩成小弹窗（居中显示），视觉上独立于主窗口。"""
@@ -551,8 +592,9 @@ class WindowHooks:
                     was_hidden = self._hidden or bool(user32.IsIconic(self._last_hwnd or 0))
                     self.import_from_hidden = was_hidden
                     self.import_requested = True
-                    if was_hidden:
-                        self.show()
+                    # 不管是否隐藏都拉到前台：窗口可见但被别的程序挡住时，
+                    # 不置前前端就收不到 focus/visibilitychange，只能等轮询或用户点一下。
+                    self.show()
                 return 0
             if msg == WM_TRAY:
                 ev = int(lparam) & 0xFFFF
