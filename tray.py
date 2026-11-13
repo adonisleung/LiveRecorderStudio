@@ -766,7 +766,10 @@ class WindowHooks:
                     # 整个消息循环被阻塞，表现就是按下快捷键后界面彻底卡死。
                     hwnd_now = self._last_hwnd or self._find_main() or 0
                     iconic = bool(user32.IsIconic(hwnd_now))
-                    was_hidden = self._hidden or iconic
+                    # 只有「显式隐藏」（Alt+F1）才记成 from_hidden：
+                    # 最小化到任务栏是用户主动保留的可见状态，关掉弹窗后不该自动藏起来，
+                    # 否则表现为「最小化时用热键，关掉框窗口就没了」。
+                    was_hidden = self._hidden
                     self.import_from_hidden = was_hidden
                     self.import_requested = True
                     # 不管是否隐藏都拉到前台：窗口可见但被别的程序挡住时，
