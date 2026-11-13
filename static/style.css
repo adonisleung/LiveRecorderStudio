@@ -718,7 +718,7 @@ tbody tr:first-child .tip-wrap:hover::after{transform:translate(-50%,0)}
   /* 严格两列：用 auto-fit + 最小宽度会在宽窗口下自动变成三列/四列，每列被压到 170px，
      名字全成省略号。这里固定 2 列，只有极窄时才降级单列。 */
   grid-template-columns:repeat(2,minmax(0,1fr));
-  gap:6px 8px;padding:8px 2px 14px;align-content:start}
+  gap:4px 8px;padding:8px 2px 14px;align-content:start}
 /* 行高对齐单列的 51px：内容 23 + padding 上下 + 边框 */
 .table-wrap.two-col tbody tr{display:grid;
   /* 名字列下限设为 0：卡片太窄时宁可省略号，也不能溢出压住右侧操作图标 */

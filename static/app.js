@@ -142,7 +142,7 @@ function render(s) {
   // 按可视高度算行数：刚好铺满、且不产生滚动，所以折叠态不需要滚动条。
   const wrapEl = document.querySelector('.table-wrap');
   const availH = (wrapEl && wrapEl.clientHeight) || 640;
-  const rowPitch = twoCol ? 57 : 51;              // 行高 + 行间距
+  const rowPitch = twoCol ? 55 : 51;              // 行高 + 行间距（双列 51+4）
   // 扣掉 .two-col tbody 的上下 padding（8 + 14），否则会溢出十几像素、滚动条又冒出来
   const usableH = Math.max(0, availH - 26);
   const MIN_ROWS = Math.max(2, Math.floor(usableH / rowPitch)) * (twoCol ? 2 : 1);
