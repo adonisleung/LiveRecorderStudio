@@ -297,42 +297,71 @@ class WindowHooks:
 
     def hide(self) -> bool:
         """整体隐藏：窗口消失，托盘也不留图标（只能靠还原热键召回）。"""
-        hwnd = self._find_main()
-        if not hwnd:
-            return False
-        # 记下隐藏前的位置/大小/是否最大化，还原时原样放回
-        pl = WINDOWPLACEMENT()
-        pl.length = ctypes.sizeof(WINDOWPLACEMENT)
-        if user32.GetWindowPlacement(hwnd, ctypes.byref(pl)):
-            self._placement = pl
-        user32.ShowWindow(hwnd, SW_HIDE)
+        # 先用 pywebview 自己的窗口对象：它持有 uid→控件引用，不依赖窗口标题。
+        pw = self._pw_window()
+        ok_pw = False
+        if pw is not None:
+            try:
+                pw.hide()
+                ok_pw = True
+            except Exception as e:
+                _log('hide: pywebview failed %s' % e)
+
+        hwnd = self._last_hwnd or self._find_main()
+        if hwnd:
+            self._last_hwnd = hwnd
+            # 记下隐藏前的位置/大小/是否最大化，还原时原样放回
+            pl = WINDOWPLACEMENT()
+            pl.length = ctypes.sizeof(WINDOWPLACEMENT)
+            if user32.GetWindowPlacement(hwnd, ctypes.byref(pl)):
+                self._placement = pl
+            user32.ShowWindow(hwnd, SW_HIDE)
+
+        # 即使两条路都没成功也记成已隐藏：用户按的是隐藏键，
+        # 下次还原时要按「已隐藏」处理，否则会走错分支。
         self._hidden = True
-        self._last_hwnd = hwnd       # 记住真窗口句柄，show() 直接用
         self._del_icon()
-        return True
+        _log('hide: hwnd=%s pw=%s' % (hwnd or 0, ok_pw))
+        return bool(hwnd or ok_pw)
 
     def show(self) -> bool:
+        # 先用 pywebview 自己的窗口对象恢复：它持有 uid → 控件引用，
+        # 完全不依赖窗口标题匹配（标题被页面 <title> 一改，FindWindow 就全失效，
+        # 表现正是「窗口隐藏/最小化后热键叫不回来」）。
+        pw = self._pw_window()
+        ok_pw = False
+        if pw is not None:
+            try:
+                pw.show()
+                ok_pw = True
+            except Exception as e:
+                _log('show: pywebview.show failed %s' % e)
+            try:
+                pw.restore()        # 最小化状态要用 restore 才回得来
+            except Exception:
+                pass
+
         hwnd = self._last_hwnd or self._find_main()
-        if not hwnd:
-            return False
-        # 缓存句柄：hide/show/最小化检测/热键推送都要用。
-        # 之前只有 hide() 才写这个字段，导致没隐藏过窗口时判断恒为 0。
-        self._last_hwnd = hwnd
-        # 最小化时必须先 SW_RESTORE 才能正常显示和置前
-        if user32.IsIconic(hwnd):
-            user32.ShowWindow(hwnd, SW_RESTORE)
-        elif self._placement is not None:
-            pl = self._placement
-            pl.length = ctypes.sizeof(WINDOWPLACEMENT)
-            user32.SetWindowPlacement(hwnd, ctypes.byref(pl))
-            self._placement = None
-            user32.ShowWindow(hwnd, SW_SHOW)
-        else:
-            user32.ShowWindow(hwnd, SW_SHOW)
-        self._force_foreground(hwnd)
+        if hwnd:
+            # 缓存句柄：hide/show/最小化检测/热键推送都要用。
+            self._last_hwnd = hwnd
+            # 最小化时必须先 SW_RESTORE 才能正常显示和置前
+            if user32.IsIconic(hwnd):
+                user32.ShowWindow(hwnd, SW_RESTORE)
+            elif self._placement is not None:
+                pl = self._placement
+                pl.length = ctypes.sizeof(WINDOWPLACEMENT)
+                user32.SetWindowPlacement(hwnd, ctypes.byref(pl))
+                self._placement = None
+                user32.ShowWindow(hwnd, SW_SHOW)
+            else:
+                user32.ShowWindow(hwnd, SW_SHOW)
+            self._force_foreground(hwnd)
+
         self._hidden = False
         self._del_icon()
-        return True
+        _log('show: hwnd=%s pw=%s' % (hwnd or 0, ok_pw))
+        return bool(hwnd or ok_pw)
 
     @staticmethod
     def _force_foreground(hwnd) -> None:
@@ -478,40 +507,82 @@ class WindowHooks:
         return ok
 
     # ---------- 内部 ----------
-    def _find_main(self):
-        """精确找主窗口：PID + 标题匹配，优先可见窗口。
+    @staticmethod
+    def _pw_window():
+        """取 pywebview 的 Window 对象（内部按 uid 持有控件引用，不依赖窗口标题）。"""
+        try:
+            import webview as _wv
+            windows = getattr(_wv, 'windows', None) or []
+            return windows[0] if windows else None
+        except Exception:
+            return None
 
-        FindWindowW(None, title) 在 WebView2 环境下不可靠——pywebview 会创建
-        多个同名隐藏辅助窗口，FindWindowW 按 Z-order 找到的第一个可能是隐藏的
-        假窗口，ShowWindow(SW_HIDE) 对它操作等于没隐藏真窗口。
-        这里用 EnumWindows 遍历「本进程 + 标题匹配」的窗口，优先返回可见的；
-        窗口已隐藏时（hide 之后），降级返回隐藏的真窗口（用于 show 还原）。
+    def _find_main(self):
+        """找主窗口：优先标题精确匹配，兜底取「同进程 + 有标题 + 面积最大」的窗口。
+
+        原来只按标题精确匹配，太脆弱 —— WebView2 会把页面 <title> 同步成窗口标题，
+        标题一有偏差（改文案、加后缀）hide/show 就全部失效，
+        外部表现就是「窗口隐藏或最小化后，热键怎么也唤不回来」。
+        加这层兜底后，标题对不上也能找到那个真正的大窗口。
         """
+        try:
+            user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+            user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+            user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+            user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+        except Exception:
+            pass
+
+        def _as_int(h):
+            """HWND 可能是 int 也可能是 c_void_p，统一成 int 便于日志和返回。"""
+            if not h:
+                return 0
+            return h.value if hasattr(h, 'value') else int(h)
+
         pid = kernel32.GetCurrentProcessId()
-        visible_hwnd = 0
-        hidden_hwnd = 0
+        exact = 0
+        best = 0
+        best_area = 0
+        cands = []
 
         @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
         def _enum_cb(hwnd, _lparam):
-            nonlocal visible_hwnd, hidden_hwnd
+            nonlocal exact, best, best_area
             lp_pid = wintypes.DWORD()
             user32.GetWindowThreadProcessId(hwnd, ctypes.byref(lp_pid))
             if lp_pid.value != pid:
                 return True
+            cbuf = ctypes.create_unicode_buffer(128)
+            user32.GetClassNameW(hwnd, cbuf, 128)
+            if cbuf.value.startswith('LRS_HookWnd'):
+                return True          # 自己建的消息窗口，不是主窗口
             length = user32.GetWindowTextLengthW(hwnd)
             if length <= 0:
                 return True
             buf = ctypes.create_unicode_buffer(length + 1)
             user32.GetWindowTextW(hwnd, buf, length + 1)
+            if not exact and len(cands) < 4:
+                cands.append('%x|%s|%s' % (_as_int(hwnd), cbuf.value[:14], buf.value[:20]))
             if buf.value == self.title:
-                if user32.IsWindowVisible(hwnd):
-                    visible_hwnd = hwnd
-                    return False    # 找到可见的立即停
-                hidden_hwnd = hwnd  # 记住隐藏的做备用
+                exact = _as_int(hwnd)
+                return False
+            r = wintypes.RECT()
+            if user32.GetWindowRect(hwnd, ctypes.byref(r)):
+                area = (r.right - r.left) * (r.bottom - r.top)
+                if area > best_area:
+                    best_area = area
+                    best = _as_int(hwnd)
             return True
 
         user32.EnumWindows(_enum_cb, 0)
-        return visible_hwnd or hidden_hwnd or user32.FindWindowW(None, self.title)
+        if exact:
+            return exact
+        if best:
+            _log('find_main: 标题未命中，按面积兜底 hwnd=%s 候选=%s'
+                 % (hex(best), ' ; '.join(cands)))
+            return best
+        _log('find_main: 没找到任何候选窗口 cands=%s' % (' ; '.join(cands) or '无'))
+        return _as_int(user32.FindWindowW(None, self.title))
 
     def _run(self):
         try:
