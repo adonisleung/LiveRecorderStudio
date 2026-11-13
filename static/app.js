@@ -1356,7 +1356,9 @@ if (_tableWrap) {
    窗口恢复可见的瞬间立刻拉一次 —— 全局导入热键就是靠这条路径弹窗的。 */
 let pollTimer = null;
 function pollDelay() {
-  if (document.hidden) return 5000;   // 最小化/隐藏：降到 5 秒，恢复可见时另有秒级刷新
+  // 隐藏时也保持 2 秒：热键唤回窗口后要在 2 秒内拿到 import_requested。
+  // 之前设 5 秒，加上窗口恢复时 visibleitychange 不一定触发，就成了"按了没反应"。
+  if (document.hidden) return 2000;
   const rooms = (lastState && lastState.rooms) || [];
   const busy = rooms.some(r => r.status === 'recording' || r.status === 'live');
   // 可见且空闲时也必须保持较短周期：全局导入热键走的就是这条轮询（2.5s 内必弹）
@@ -1373,6 +1375,9 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) { lastRoomSig = ''; refresh(); }
   schedulePoll();
 });
+// 窗口拿到焦点就立刻拉一次。热键 SetForegroundWindow 之后 WebView2 不一定发
+// visibilitychange，但一定会触发 focus —— 这就是「按了热键没反应、点一下才弹」的原因。
+window.addEventListener('focus', () => { lastRoomSig = ''; refresh(); });
 schedulePoll(0);
 
 /* 深链：?open=<房间id> 直接打开详情，方便定位与分享 */
