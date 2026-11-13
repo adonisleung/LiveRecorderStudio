@@ -138,10 +138,17 @@ function render(s) {
   }
   const cfg = s.config || {};
   const all = s.rooms || [];
-  // 未开播的默认不渲染：1300 个房间里常年只有十来个活跃，
-  // 全渲染是 3.7 万个 DOM 节点，滚动、首屏、行 patch 都白受罪。
-  const foldedCount = showAllRooms ? 0 : all.filter(r => r.status === 'offline').length;
-  const rooms = foldedCount ? all.filter(r => r.status !== 'offline') : all;
+  // 折叠不是「只留活跃」——那样一屏只有十来行，下面一大片空白很难看。
+  // 改成：活跃房间全留，再按「最近开播」补未开播的，直到铺满一屏。
+  const MIN_ROWS = twoCol ? 32 : 18;
+  const activeRooms = all.filter(r => r.status !== 'offline');
+  const rooms = showAllRooms
+    ? all
+    : (activeRooms.length >= MIN_ROWS
+        ? activeRooms
+        : activeRooms.concat(all.filter(r => r.status === 'offline')
+            .slice(0, MIN_ROWS - activeRooms.length)));
+  const foldedCount = all.length - rooms.length;
   // 行级增量更新：只替换真正变化的行，不再每 1.2 秒把上千行 innerHTML 重解析。
   // 整表重建一次要几百毫秒，跑十几小时后渲染进程会涨到 600MB+ 并卡死。
   const rowsEl = $('#roomRows');

@@ -899,3 +899,86 @@ tbody tr:hover{background:var(--state-hover)}
     animation-iteration-count:1 !important;transition-duration:.01ms !important}
 }
 .ctx-menu button:hover{background:var(--accent-dim);color:var(--primary)}
+
+/* ================= 毛玻璃主题 =================
+   html.glass 控制开关，去掉这个 class 即回退原样式。
+   注意：本应用为修 WebView2 黑屏禁用了 GPU，backdrop-filter 走 CPU 软件光栅，
+   所以只给「面积小、且不随列表滚动重绘」的元素开模糊：
+   顶栏 / 侧栏 / 弹窗。列表面板只做半透明，避免滚动时每帧重算。 */
+html.glass{
+  --glass-panel:rgba(18,23,29,.48);
+  --glass-elev:rgba(23,29,36,.70);
+  --glass-solid:rgba(13,17,21,.90);      /* 需要压住背后内容的地方 */
+  --glass-line:rgba(255,255,255,.085);
+  --glass-hi:inset 0 1px 0 rgba(255,255,255,.07);
+  --glass-shadow:0 12px 36px rgba(0,0,0,.42);
+  --glass-card:rgba(255,255,255,.05);
+  --glass-card-hover:rgba(255,255,255,.09);
+}
+html.glass[data-theme="light"]{
+  --glass-panel:rgba(255,255,255,.58);
+  --glass-elev:rgba(255,255,255,.80);
+  --glass-solid:rgba(250,252,251,.93);
+  --glass-line:rgba(12,32,27,.10);
+  --glass-hi:inset 0 1px 0 rgba(255,255,255,.75);
+  --glass-shadow:0 12px 30px rgba(12,32,27,.10);
+  --glass-card:rgba(255,255,255,.58);
+  --glass-card-hover:rgba(255,255,255,.85);
+}
+
+/* 环境光斑：圆心放在画面内，让左上/右下真正有颜色，中间淡出 */
+html.glass body::before{
+  content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:
+    radial-gradient(52% 46% at 6% 4%, rgba(77,224,203,.46), transparent 68%),
+    radial-gradient(50% 44% at 94% 96%, rgba(96,140,255,.46), transparent 68%),
+    radial-gradient(32% 28% at 84% 8%, rgba(186,120,255,.26), transparent 70%);
+}
+html.glass[data-theme="light"] body::before{opacity:.55}
+html.glass .shell{position:relative;z-index:1}
+
+/* 顶栏：背后是固定的页面底色，blur 结果可复用，不随列表滚动重算 */
+html.glass .topbar{
+  background:linear-gradient(180deg,var(--glass-elev),var(--glass-panel));
+  backdrop-filter:blur(18px) saturate(150%);
+  -webkit-backdrop-filter:blur(18px) saturate(150%);
+}
+
+/* 列表面板：只半透明 + 高光边，不开 blur */
+html.glass .panel{
+  background:var(--glass-panel);
+  border:1px solid var(--glass-line);
+  box-shadow:var(--glass-shadow),var(--glass-hi);
+}
+
+/* 侧栏浮在列表上方，日志滚动频率低，可以开轻模糊 */
+html.glass .side{
+  background:var(--glass-panel);
+  backdrop-filter:blur(14px) saturate(140%);
+  -webkit-backdrop-filter:blur(14px) saturate(140%);
+}
+
+/* 状态栏压在列表上，用接近不透明的底 + 无 blur，避免滚动时每帧重算 */
+html.glass .statusbar{background:linear-gradient(0deg,var(--glass-solid),var(--glass-panel))}
+
+/* 弹窗：小面积静态区域，模糊可以给足 */
+html.glass .modal-card{
+  background:var(--glass-elev);
+  backdrop-filter:blur(26px) saturate(160%);
+  -webkit-backdrop-filter:blur(26px) saturate(160%);
+  border:1px solid var(--glass-line);
+  box-shadow:0 26px 64px rgba(0,0,0,.48),var(--glass-hi);
+}
+html.glass .modal::backdrop{
+  background:rgba(0,0,0,.42);
+  backdrop-filter:blur(8px);
+  -webkit-backdrop-filter:blur(8px);
+}
+
+/* 双列卡片：半透明玻璃片感 */
+html.glass .table-wrap.two-col tbody tr{
+  background:var(--glass-card);
+  border-color:var(--glass-line);
+  box-shadow:var(--glass-hi);
+}
+html.glass .table-wrap.two-col tbody tr:hover{background:var(--glass-card-hover)}
