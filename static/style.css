@@ -326,11 +326,23 @@ td:last-child .link-btn+.link-btn{margin-left:2px}
   border:1px solid var(--outline-variant);white-space:nowrap}
 .statusbar .sb-note{font-size:10px;opacity:.55;background:none;border-color:transparent}
 .muted{color:var(--dim)}
+/* 列表折叠提示：默认收起未开播房间，这里给个可点的展开入口 */
+.hint-fold{opacity:.65}
+.link-btn{background:none;border:0;padding:0 0 0 8px;font:inherit;color:var(--primary);
+  cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.link-btn:hover{opacity:.75}
 
 /* ---------------- dialogs ---------------- */
-.modal{position:fixed;inset:0;background:var(--scrim);backdrop-filter:blur(2px);
-  display:grid;place-items:center;z-index:30}
-.modal.hidden{display:none}
+/* 原生 <dialog> + showModal()：top layer、focus trap、Esc 关闭、背景 inert
+   全部由浏览器提供，不用再手写显隐与层级。历史上一堆弹窗 bug
+   （头部 innerHTML 被覆盖、背景能滚动、z-index 打架）都源于手写遮罩。 */
+.modal{position:fixed;inset:0;margin:0;padding:0;border:0;
+  width:100%;height:100%;max-width:none;max-height:none;
+  background:transparent;display:grid;place-items:center;overflow:hidden}
+.modal:not([open]){display:none}
+.modal::backdrop{background:var(--scrim);backdrop-filter:blur(2px);overscroll-behavior:contain}
+/* 弹窗打开时锁住背后页面的滚动（showModal 只让背景 inert，不禁滚动） */
+body:has(dialog[open]){overflow:hidden}
 .modal-card{width:min(520px,92vw);background:var(--surface-c-high);border-radius:var(--shape-xl);
   box-shadow:var(--e3);overflow:hidden;animation:popIn .22s cubic-bezier(.2,.8,.3,1)}
 @keyframes popIn{from{transform:translateY(14px) scale(.97);opacity:0}to{transform:none;opacity:1}}
@@ -549,6 +561,8 @@ td:last-child .link-btn+.link-btn{margin-left:2px}
 .modal-card.import-dialog .modal-foot .foot-right{display:flex;gap:10px;margin-left:auto}
 .modal-card.import-dialog .modal-foot .btn{min-width:72px;height:34px;font-size:12.5px}
 .import-head-right{display:flex;align-items:center;gap:10px}
+/* 快捷键框定宽：input 默认按字符数撑开，会把标题挤到边上 */
+.import-head-right .keycap{width:100px;flex:none;padding:5px 8px}
 .hotkey-badge{padding:3px 10px;border-radius:20px;border:1px solid var(--outline-variant);
   font-size:11px;color:var(--on-surface-variant);letter-spacing:.3px;background:var(--surface-c-lowest);
   user-select:none;cursor:pointer}

@@ -9,6 +9,9 @@ let lastLogRebuild = 0;        // 上次日志重建时刻（日志节流）
 let rowSigCache = new Map();   // 行 id -> 外观签名，用于行级增量更新
 let lastOrderSig = '';         // 上次的行顺序，判断是否需要重排
 let drawerId = null, lastState = null;
+// 未开播的房间默认折叠：1300 个房间里通常只有十来个活跃，
+// 全部渲染出来是 3.7 万个 DOM 节点，滚动和首屏都白受罪。
+let showAllRooms = localStorage.getItem('lrs.showAll') === '1';
 const STATUS = {idle:'待检查', checking:'检测中', offline:'未开播', live:'直播中', recording:'录制中', error:'异常'};
 
 async function api(path, opts = {}) {
@@ -125,11 +128,15 @@ function render(s) {
   // 全局导入热键触发（回退路径，evaluate_js 失败时用）
   if (s.import_requested) {
     window._importFromHidden = !!s.import_from_hidden;
-    if ($('#modal').classList.contains('hidden')) openImportDialog();
+    if (!isModalOpen()) openImportDialog();
     return;
   }
   const cfg = s.config || {};
-  const rooms = s.rooms || [];
+  const all = s.rooms || [];
+  // 未开播的默认不渲染：1300 个房间里常年只有十来个活跃，
+  // 全渲染是 3.7 万个 DOM 节点，滚动、首屏、行 patch 都白受罪。
+  const foldedCount = showAllRooms ? 0 : all.filter(r => r.status === 'offline').length;
+  const rooms = foldedCount ? all.filter(r => r.status !== 'offline') : all;
   // 行级增量更新：只替换真正变化的行，不再每 1.2 秒把上千行 innerHTML 重解析。
   // 整表重建一次要几百毫秒，跑十几小时后渲染进程会涨到 600MB+ 并卡死。
   const rowsEl = $('#roomRows');
@@ -183,11 +190,17 @@ function render(s) {
       rowSigCache = sigMap;
     }
     syncTips();
-    $('#empty').classList.toggle('hidden', rooms.length > 0);
+    // 有空状态提示只在「一个房间都没有」时出现；折叠后 0 行由提示条的「显示全部」兜底
+    $('#empty').classList.toggle('hidden', all.length > 0);
   }
   const onAir = rooms.filter(r => r.status === 'recording' || r.status === 'live').length;
-  $('#roomsHint').textContent =
-    `${s.stats.total} 个房间 · ${s.stats.enabled} 个启用${onAir ? ` · ${onAir} 个在播` : ''} · 在播优先排序`;
+  const foldHtml = showAllRooms
+    ? (all.some(r => r.status === 'offline') ? ' · <button class="link-btn" data-act="toggle-fold">只看活跃</button>' : '')
+    : (foldedCount ? ` · <span class="hint-fold">已折叠 ${foldedCount} 个未开播</span><button class="link-btn" data-act="toggle-fold">显示全部</button>` : '');
+  $('#roomsHint').innerHTML =
+    `${s.stats.total} 个房间 · ${s.stats.enabled} 个启用`
+    + (onAir ? ` · ${onAir} 个在播` : '')
+    + (!all.length ? '' : ' · 在播优先') + foldHtml;
   // 时长走定点刷新（一次 querySelectorAll 建索引，不做逐行 querySelector——
   // 1381 行 × 每 1.5 秒一次选择器查询是长时间运行卡顿的主因）
   const durMap = {};
@@ -236,6 +249,22 @@ function render(s) {
   }
   if (drawerId) updateDrawerLive();
 }
+
+/* 折叠/展开未开播：集合变化幅度大，清空后走一次全量建表，
+   比逐行增删上千个 <tr> 快得多 */
+function toggleFold() {
+  showAllRooms = !showAllRooms;
+  localStorage.setItem('lrs.showAll', showAllRooms ? '1' : '0');
+  $('#roomRows').innerHTML = '';
+  rowSigCache.clear();
+  lastOrderSig = '';
+  lastRoomSig = '';
+  lastRebuild = 0;
+  if (lastState) render(lastState);
+}
+$('#roomsHint').addEventListener('click', (e) => {
+  if (e.target.dataset && e.target.dataset.act === 'toggle-fold') toggleFold();
+});
 
 async function refresh() {
   try { render(await api('/api/state')); }
@@ -326,23 +355,29 @@ function confirmDialog({title, text, okText = '确认', danger = true, onOk}) {
     <button class="btn ${danger ? 'danger' : 'primary'}" id="confirmOk">${esc(okText)}</button>`;
   $('#modalTitle').textContent = title;
   $('#modalBody').innerHTML = `<p class="confirm-text">${text}</p>`;
-  $('#modal').classList.remove('hidden');
+  showModalEl();
   $('#confirmOk').onclick = async () => {
     card.classList.remove('confirm');
-    $('#modal').classList.add('hidden');
+    closeModal();
     try { await onOk(); } catch (e) { toast(e.message); }
   };
 }
-function closeModal() {
+/* 弹窗统一入口：显隐只看 dialog 自己的 open 状态，
+   不再维护 .hidden class（两套状态并存迟早对不上，之前就是这么坏的） */
+function isModalOpen() { const d = $('#modal'); return !!(d && d.open); }
+function showModalEl() { const d = $('#modal'); if (d && !d.open) d.showModal(); }
+function closeModal() { const d = $('#modal'); if (d && d.open) d.close(); }
+
+/* 清理挂在 close 上：点取消、点遮罩、按 Esc、代码调用，四条路径都会走到这里 */
+$('#modal').addEventListener('close', () => {
   const card = document.querySelector('.modal-card');
   if (card) card.classList.remove('narrow', 'settings', 'confirm', 'hide-close', 'import-dialog');
-  $('#modal').classList.add('hidden');
   resumeHotkeys();
   if (window._importFromHidden) {
     window._importFromHidden = false;
     post('/api/window', {action: 'hide'}).catch(() => {});
   }
-}
+});
 
 /* ---------- 详情抽屉 ---------- */
 function findRoom(id) {
@@ -660,8 +695,8 @@ $('#drawer').addEventListener('click', (e) => {
 });
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  if (!$('#drawer').classList.contains('hidden')) closeDrawer();
-  else if (!$('#modal').classList.contains('hidden')) closeModal();
+  // <dialog> 的 Esc 由浏览器处理（会触发 close 事件），这里只负责抽屉
+  if (!isModalOpen() && !$('#drawer').classList.contains('hidden')) closeDrawer();
 });
 
 /* ---------- 事件 ---------- */
@@ -800,7 +835,7 @@ function bindHotkeyInput(el) {
 
 /* 关闭窗口：三选一（取消 / 缩到托盘 / 退出）。桌面窗口点 × 时由宿主拦下并回调这里。 */
 window.onHostClose = () => {
-  if (!$('#modal').classList.contains('hidden')) return;   // 已有弹窗时不叠加
+  if (isModalOpen()) return;   // 已有弹窗时不叠加
   const showKey = lastState?.hotkey_show || 'Alt+F2';
   // 清理旧弹窗残留的样式类，避免串到这个弹窗（"偶尔正常"的根因）
   const card = document.querySelector('.modal-card');
@@ -813,16 +848,16 @@ window.onHostClose = () => {
     <button class="btn ghost" data-close="1">取消</button>
     <button class="btn" id="closeTray">缩到托盘</button>
     <button class="btn danger" id="closeQuit">退出程序</button>`;
-  $('#modal').classList.remove('hidden');
+  showModalEl();
   $('#closeTray').onclick = async () => {
     if (card) card.classList.remove('confirm');
-    $('#modal').classList.add('hidden');
+    closeModal();
     try { await post('/api/window', {action: 'tray'}); }
     catch (e) { toast(e.message); }
   };
   $('#closeQuit').onclick = async () => {
     if (card) card.classList.remove('confirm');
-    $('#modal').classList.add('hidden');
+    closeModal();
     // 立即关窗不等后端收尾，退出体验零延迟
     try { await post('/api/window', {action: 'hide'}); } catch (e) {}
     toast('正在退出…');
@@ -895,7 +930,7 @@ function openModal(title, bodyHtml, okText, onSubmit, footExtra = '') {
     <button class="btn ghost" data-close="1">取消</button>
     <button class="btn primary" id="modalOk">${esc(okText)}</button>`;
   modalSubmit = onSubmit;
-  $('#modal').classList.remove('hidden');
+  showModalEl();
   $('#modalOk').onclick = async () => { if (modalSubmit) await modalSubmit(); };
 }
 $('#modal').addEventListener('click', (e) => {
@@ -917,14 +952,14 @@ document.addEventListener('keydown', (e) => {
   parts.push(key);
   const combo = parts.join('+');
   const wantKey = (lastState?.config?.hotkey_import) || 'Alt+1';
-  if (combo === wantKey && $('#modal').classList.contains('hidden')) {
+  if (combo === wantKey && !isModalOpen()) {
     e.preventDefault();
     openImportDialog();
   }
 });
 
 function openImportDialog() {
-  if (!document.querySelector('#modal').classList.contains('hidden')) return;
+  if (isModalOpen()) return;
   try {
     const cfg = lastState?.config || {};
     const importKey = cfg.hotkey_import || 'Alt+1';
@@ -949,7 +984,7 @@ function openImportDialog() {
         <button class="btn ghost" data-close="1">取消</button>
         <button class="btn primary" id="modalOk">导入</button>
       </div>`;
-    $('#modal').classList.remove('hidden');
+    showModalEl();
     // 事件绑定
     $('#modalOk').onclick = async () => {
       const text = ($('#importText') || {}).value || '';
