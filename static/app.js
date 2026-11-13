@@ -200,7 +200,7 @@ function render(s) {
   $('#roomsHint').innerHTML =
     `${s.stats.total} 个房间 · ${s.stats.enabled} 个启用`
     + (onAir ? ` · ${onAir} 个在播` : '')
-    + (!all.length ? '' : ' · 在播优先') + foldHtml;
+    + foldHtml;
   // 时长走定点刷新（一次 querySelectorAll 建索引，不做逐行 querySelector——
   // 1381 行 × 每 1.5 秒一次选择器查询是长时间运行卡顿的主因）
   const durMap = {};
@@ -725,8 +725,9 @@ function syncTips() {
 
 function applyLayout() {
   $('.table-wrap').classList.toggle('two-col', twoCol);
-  $('#btnLayoutText').textContent = twoCol ? '单列' : '双列';
-  $('#btnLayout').dataset.tip = twoCol ? '切换为单列布局' : '切换为双列布局';
+  // 文字显示「当前布局」，点一下切到另一种——之前写的是下一步动作，看着像没变
+  $('#btnLayoutText').textContent = twoCol ? '双列' : '单列';
+  $('#btnLayout').dataset.tip = twoCol ? '当前双列，点击切换为单列' : '当前单列，点击切换为双列';
   $('#btnLayout').classList.toggle('active', twoCol);
   localStorage.setItem('lrs.twocol', twoCol ? '1' : '0');
   syncTips();

@@ -673,8 +673,12 @@ tbody tr:first-child .tip-wrap:hover::after{transform:translate(-50%,0)}
   .grid{padding:12px 0}
   .side{flex-direction:column}
   .stats{grid-template-columns:1fr 1fr}
-  .panel-head{flex-direction:column;align-items:stretch}
-  .panel-actions{width:100%}
+  /* 标题与「单双列 / 加号」保持同一行：按钮钉在右侧，提示条可以折行。
+     原来这里改成 column + width:100%，按钮会被挤到第二行左端。 */
+  .panel-head{flex-wrap:nowrap;align-items:center}
+  .panel-head>div:first-child{flex:1 1 auto;min-width:0}
+  .panel-head p{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.45}
+  .panel-actions{flex:0 0 auto;width:auto;flex-wrap:nowrap}
   /* 窄窗口下原来写死 min-width:560px，比容器还宽，右侧操作图标被挤出视口。
      改为定宽列 + 名字列自适应省略，窗口再窄也不横向滚动。
      只作用于单列表格：双列是卡片网格，定宽会把它压扁。 */
