@@ -11,10 +11,27 @@
 from __future__ import annotations
 
 import ctypes
+import os
 import re
+import tempfile
 import threading
 import time
 from ctypes import wintypes
+
+# 热键链路日志：热键是交互问题，出问题时光看代码猜不出来，
+# 落到临时目录（%TEMP%\lrs_hotkey.log）里，回读就能定位卡在哪一步。
+_LOG_PATH = os.path.join(tempfile.gettempdir(), 'lrs_hotkey.log')
+
+
+def _log(msg: str) -> None:
+    try:
+        if os.path.exists(_LOG_PATH) and os.path.getsize(_LOG_PATH) > 200 * 1024:
+            with open(_LOG_PATH, 'w', encoding='utf-8'):
+                pass                      # 超过 200KB 直接清空，避免无限增长
+        with open(_LOG_PATH, 'a', encoding='utf-8') as f:
+            f.write('%s %s\n' % (time.strftime('%m-%d %H:%M:%S'), msg))
+    except Exception:
+        pass
 
 user32 = ctypes.windll.user32
 shell32 = ctypes.windll.shell32
@@ -234,7 +251,7 @@ class WindowHooks:
         self._last_hwnd = 0        # hide() 记下的真实窗口句柄，show() 直接用
         self._icon = None
         self._icon_added = False
-        self._js_pushing = 0.0      # 上次 JS 推送的开始时刻，0 表示空闲
+        self._js_threads = 0        # 正在跑的推送线程数，超过上限就不再堆
         self._thread = None
         self._ready = threading.Event()
         self._lock = threading.RLock()
@@ -282,6 +299,9 @@ class WindowHooks:
         hwnd = self._last_hwnd or self._find_main()
         if not hwnd:
             return False
+        # 缓存句柄：hide/show/最小化检测/热键推送都要用。
+        # 之前只有 hide() 才写这个字段，导致没隐藏过窗口时判断恒为 0。
+        self._last_hwnd = hwnd
         # 最小化时必须先 SW_RESTORE 才能正常显示和置前
         if user32.IsIconic(hwnd):
             user32.ShowWindow(hwnd, SW_RESTORE)
@@ -328,39 +348,50 @@ class WindowHooks:
                 pass
 
     def _push_import_js(self) -> None:
-        """热键后从**独立线程**异步唤起前端导入框。
+        """热键后从独立线程把「打开导入框」推给前端。
 
-        为什么不在 _wndproc 里直接调 evaluate_js：pywebview 的 evaluate_js 走
-        WinForms 的 Invoke + 信号量等待，在消息循环线程里调用就是「自己等自己」，
-        窗口最小化时渲染进程不响应，直接把界面锁死。
-        放到独立线程后消息循环始终空闲，Invoke 能被正常处理，只阻塞这个线程。
+        为什么不直接在 _wndproc 里调 evaluate_js：
+        那是在消息循环线程里同步等待，等于「自己等自己」，窗口最小化时界面直接锁死。
 
-        为什么还要推这一下：前端轮询在窗口不在前台时会被 Chromium 节流到
-        每分钟一次（已用 WebView2 参数压制，但参数万一没生效还有这条兜底），
-        推送是 IPC 调用，不依赖页面定时器，窗口一恢复就能立刻执行。
+        为什么允许多个推送线程并存（上限 3）：
+        pywebview 的 evaluate_js 内部是 Invoke + semaphore 等待，渲染进程还没
+        活过来时它不返回。之前用「一次只许一个，卡住就跳过后续」的策略，
+        结果第一次卡住后，第二次第三次全被跳过 —— 正好是
+        「第一次正常、第二次慢、第三次没反应」。现在改成计数上限，
+        某一次卡住只影响它自己，后续热键照样能推。
         """
-        now = time.time()
-        # 上一次推送还在跑就跳过；但超过 5 秒仍未返回说明渲染进程卡住了，
-        # 视为僵死重新放行，否则一次卡死会让之后所有热键都退化成轮询。
-        if self._js_pushing and now - self._js_pushing < 5.0:
+        if self._js_threads >= 3:
+            _log('push skipped: %d threads still alive' % self._js_threads)
             return
-        self._js_pushing = now
+        self._js_threads += 1
         from_hidden = 'true' if self.import_from_hidden else 'false'
+        # 前端统一入口：已开着就聚焦输入框，没开才弹出（避免连按看起来没反应）
+        script = ('try{hotkeyOpenImport&&hotkeyOpenImport(%s)}catch(e){};1' % from_hidden)
 
         def _run():
+            t0 = time.time()
             try:
-                time.sleep(0.20)        # 等 show() 把窗口恢复完，别在最小化态下发脚本
+                # 等窗口真的离开最小化：渲染进程挂起时发脚本会一直等
+                hwnd = self._last_hwnd or self._find_main() or 0
+                waited = 0
+                while hwnd and user32.IsIconic(hwnd) and waited < 1200:
+                    time.sleep(0.1)
+                    waited += 100
+                time.sleep(0.10)
+
                 import webview as _wv
                 windows = getattr(_wv, 'windows', None) or []
                 if not windows:
+                    _log('push skipped: no window')
                     return
-                windows[0].evaluate_js(
-                    f'window._importFromHidden={from_hidden};'
-                    'try{openImportDialog&&openImportDialog()}catch(e){};1')
-            except Exception:
-                pass                    # 推不动就走轮询兜底，绝不把异常抛回消息循环
+
+                windows[0].evaluate_js(script)
+                _log('push ok %.0fms waited=%dms'
+                     % ((time.time() - t0) * 1000, waited))
+            except Exception as e:
+                _log('push FAILED %s: %s' % (type(e).__name__, e))
             finally:
-                self._js_pushing = 0.0
+                self._js_threads = max(0, self._js_threads - 1)
 
         threading.Thread(target=_run, daemon=True, name='lrs-import-js').start()
 
@@ -628,12 +659,17 @@ class WindowHooks:
                     # 绝对不能在消息循环里同步调 evaluate_js —— 窗口最小化时
                     # WebView2 渲染进程会被 Chromium 节流/挂起，JS 请求死等返回值，
                     # 整个消息循环被阻塞，表现就是按下快捷键后界面彻底卡死。
-                    was_hidden = self._hidden or bool(user32.IsIconic(self._last_hwnd or 0))
+                    hwnd_now = self._last_hwnd or self._find_main() or 0
+                    iconic = bool(user32.IsIconic(hwnd_now))
+                    was_hidden = self._hidden or iconic
                     self.import_from_hidden = was_hidden
                     self.import_requested = True
                     # 不管是否隐藏都拉到前台：窗口可见但被别的程序挡住时，
                     # 不置前前端就收不到 focus/visibilitychange，只能等轮询或用户点一下。
+                    t_show = time.time()
                     self.show()
+                    _log('hotkey: hidden=%s iconic=%s show=%.0fms'
+                         % (was_hidden, iconic, (time.time() - t_show) * 1000))
                     # 独立线程异步推一次，绕开「后台轮询被节流、必须点一下才消费」的问题
                     self._push_import_js()
                 return 0

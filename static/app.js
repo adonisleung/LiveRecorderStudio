@@ -130,10 +130,9 @@ function rowNode(r) {
 
 function render(s) {
   lastState = s;
-  // 全局导入热键触发（回退路径，evaluate_js 失败时用）
+  // 全局导入热键触发（回退路径，IPC 推送失败时靠轮询走到这里）
   if (s.import_requested) {
-    window._importFromHidden = !!s.import_from_hidden;
-    if (!isModalOpen()) openImportDialog();
+    hotkeyOpenImport(s.import_from_hidden);
     return;
   }
   const cfg = s.config || {};
@@ -1028,6 +1027,22 @@ function openImportDialog() {
     console.error('openImportDialog error:', e);
     toast('打开导入框失败：' + e.message);
   }
+}
+
+/* 热键唤起导入框的唯一入口（后端 IPC 推送和前端轮询都走这里）。
+   已经开着时不再重复打开，但要把焦点给回输入框 —— 否则用户连按热键
+   看着像「没反应」，实际上框一直在那儿。 */
+function hotkeyOpenImport(fromHidden) {
+  window._importFromHidden = !!fromHidden;
+  const d = document.getElementById('modal');
+  if (d && d.open) {
+    const t = document.getElementById('importText');
+    if (t) {
+      try { t.focus(); t.select(); } catch (e) {}
+    }
+    return;
+  }
+  openImportDialog();
 }
 
 function bindImportHotkey() {
