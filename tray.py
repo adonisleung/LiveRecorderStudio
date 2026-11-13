@@ -544,19 +544,15 @@ class WindowHooks:
                 elif hid == 2:
                     self.show()
                 elif hid == 3:
-                    was_hidden = self._hidden or user32.IsIconic(self._last_hwnd or 0)
+                    # 只做两件事：标记请求 + 恢复窗口，然后立刻返回。
+                    # 绝对不能在消息循环里同步调 evaluate_js —— 窗口最小化时
+                    # WebView2 渲染进程会被 Chromium 节流/挂起，JS 请求死等返回值，
+                    # 整个消息循环被阻塞，表现就是按下快捷键后界面彻底卡死。
+                    was_hidden = self._hidden or bool(user32.IsIconic(self._last_hwnd or 0))
                     self.import_from_hidden = was_hidden
+                    self.import_requested = True
                     if was_hidden:
                         self.show()
-                    # 直接调前端打开导入框（秒弹，不走轮询避免双重触发）
-                    try:
-                        import webview as _wv
-                        if _wv.windows:
-                            flag = 'true' if was_hidden else 'false'
-                            _wv.windows[0].evaluate_js(
-                                f'window._importFromHidden={flag};openImportDialog&&openImportDialog()')
-                    except Exception:
-                        self.import_requested = True  # 回退：走轮询
                 return 0
             if msg == WM_TRAY:
                 ev = int(lparam) & 0xFFFF

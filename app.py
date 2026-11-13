@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import re
@@ -211,7 +212,21 @@ def make_handler(engine: Engine):
             pass  # 不把每次请求刷到控制台
 
         def _json(self, data, code=200):
-            body = json.dumps(data, ensure_ascii=False).encode('utf-8')
+            # separators 去掉多余空格，1300 个房间时能省 5-8%
+            body = json.dumps(data, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+            # /api/state 上千房间时约 670KB，gzip 后约 50KB（1/13）。
+            # 浏览器 fetch 会自动解压，前端代码无需改动。
+            if len(body) > 2048 and 'gzip' in (self.headers.get('Accept-Encoding') or '').lower():
+                body = gzip.compress(body, 5)
+                self.send_response(code)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.send_header('Content-Encoding', 'gzip')
+                self.send_header('Vary', 'Accept-Encoding')
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Cache-Control', 'no-store')
+                self.end_headers()
+                self.wfile.write(body)
+                return
             self.send_response(code)
             self.send_header('Content-Type', 'application/json; charset=utf-8')
             self.send_header('Content-Length', str(len(body)))

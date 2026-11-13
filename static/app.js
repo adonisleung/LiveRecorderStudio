@@ -4,9 +4,10 @@ const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) =>
 
 let lastRoomSig = '', lastLogSig = '';
 let hoverPause = false;        // 鼠标悬停表格时暂停重建，避免行从鼠标下跳走
-let pendingRebuild = false;    // 悬停/节流期间攒下的重建任务
-let lastRebuild = 0;           // 上次整表重建时刻（重建节流）
+let lastRebuild = 0;           // 上次表格 patch 时刻（节流）
 let lastLogRebuild = 0;        // 上次日志重建时刻（日志节流）
+let rowSigCache = new Map();   // 行 id -> 外观签名，用于行级增量更新
+let lastOrderSig = '';         // 上次的行顺序，判断是否需要重排
 let drawerId = null, lastState = null;
 const STATUS = {idle:'待检查', checking:'检测中', offline:'未开播', live:'直播中', recording:'录制中', error:'异常'};
 
@@ -105,6 +106,20 @@ function roomRow(r) {
     </div></td></tr>`;
 }
 
+/* 行的外观签名：只含会改变这一行渲染结果的字段。
+   时长/大小每轮都在跳，排除在外，由 render 里的定点更新单独处理。 */
+function rowSigOf(r) {
+  return [r.status === 'checking' ? '' : r.status, r.enabled ? 1 : 0, r.quality,
+          r.display_name, r.note, r.error, r.anchor, r.viewers].join('\u0001');
+}
+
+/* 用 template 建节点：即使 tr 不在 tbody 上下文里也不会被丢弃 */
+function rowNode(r) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = roomRow(r);
+  return tpl.content.firstElementChild;
+}
+
 function render(s) {
   lastState = s;
   // 全局导入热键触发（回退路径，evaluate_js 失败时用）
@@ -115,34 +130,64 @@ function render(s) {
   }
   const cfg = s.config || {};
   const rooms = s.rooms || [];
-  // 只有「会改变行结构」的字段进入签名；时长/大小每轮都在跳，
-  // 若一起进签名，表格会每 1.5 秒重建一次，画质下拉框会被反复打断。
-  // 「checking」是扫描瞬态（几百个房间轮流翻转），也排除掉，避免无意义重建。
-  const sig = JSON.stringify(rooms.map(r =>
-    [r.id, r.status === 'checking' ? '' : r.status, r.enabled, r.quality,
-     r.display_name, r.note, r.error, r.anchor]));
-  if (sig !== lastRoomSig) pendingRebuild = true;
-  // 悬停在表格上时不重建（否则行会从鼠标底下跳走，点不中）；
-  // 非悬停时也最多 1.2 秒重建一次，压掉扫描期的高频重建。
-  // 双列卡片的重排成本远高于表格行，重建间隔放宽一倍
-  const rebuildGap = $('.table-wrap').classList.contains('two-col') ? 4000 : 1200;
-  if (pendingRebuild && !hoverPause && Date.now() - lastRebuild >= rebuildGap) {
-    lastRoomSig = sig;
-    pendingRebuild = false;
+  // 行级增量更新：只替换真正变化的行，不再每 1.2 秒把上千行 innerHTML 重解析。
+  // 整表重建一次要几百毫秒，跑十几小时后渲染进程会涨到 600MB+ 并卡死。
+  const rowsEl = $('#roomRows');
+  // 别处用 lastRoomSig = '' 表示「强制全量刷新」，这里翻译成清缓存
+  if (lastRoomSig === '') { rowSigCache.clear(); lastOrderSig = ''; }
+  lastRoomSig = 'synced';
+  const orderSig = rooms.map(r => r.id).join(',');
+  const sigMap = new Map();
+  for (const r of rooms) sigMap.set(r.id, rowSigOf(r));
+  if (!hoverPause && Date.now() - lastRebuild >= 500) {
     lastRebuild = Date.now();
-    const html = rooms.map(roomRow).join('');
-    // 上千行时 innerHTML 解析要占掉半秒，挪到浏览器空闲期做，别打断点击与滚动
-    const apply = () => {
-      $('#roomRows').innerHTML = html;
-      syncTips();
-      $('#empty').classList.toggle('hidden', (s.rooms || []).length > 0);
-    };
-    if (window.requestIdleCallback) requestIdleCallback(apply, { timeout: 800 });
-    else apply();
-    const onAir = (s.rooms || []).filter(r => r.status === 'recording' || r.status === 'live').length;
-    $('#roomsHint').textContent =
-      `${s.stats.total} 个房间 · ${s.stats.enabled} 个启用${onAir ? ` · ${onAir} 个在播` : ''} · 在播优先排序`;
+    if (!rowsEl.children.length) {
+      // 首次 / 清空后：一次性建表比逐行 append 快得多
+      rowsEl.innerHTML = rooms.map(roomRow).join('');
+      rowSigCache = sigMap;
+      lastOrderSig = orderSig;
+    } else {
+      // 1) 现有行建索引（一次遍历，避免逐行 querySelector）
+      const trMap = new Map();
+      for (const tr of rowsEl.children) trMap.set(tr.dataset.id, tr);
+      // 2) 新增行 / 内容变化的行
+      for (const r of rooms) {
+        const tr = trMap.get(r.id);
+        if (!tr) {
+          const fresh = rowNode(r);
+          trMap.set(r.id, fresh);
+          rowsEl.appendChild(fresh);
+        } else if (rowSigCache.get(r.id) !== sigMap.get(r.id)) {
+          const fresh = rowNode(r);
+          tr.replaceWith(fresh);
+          trMap.set(r.id, fresh);
+        }
+      }
+      // 3) 排序变化时复用节点重排，不销毁重建
+      if (orderSig !== lastOrderSig) {
+        let ref = rowsEl.firstElementChild;
+        for (const r of rooms) {
+          const tr = trMap.get(r.id);
+          if (!tr) continue;
+          if (tr === ref) ref = ref.nextElementSibling;
+          else rowsEl.insertBefore(tr, ref);
+        }
+        lastOrderSig = orderSig;
+      }
+      // 4) 清掉已删除的行
+      if (rowsEl.children.length !== rooms.length) {
+        for (const tr of Array.from(rowsEl.children)) {
+          if (!sigMap.has(tr.dataset.id)) tr.remove();
+        }
+      }
+      rowSigCache = sigMap;
+    }
+    syncTips();
+    $('#empty').classList.toggle('hidden', rooms.length > 0);
   }
+  const onAir = rooms.filter(r => r.status === 'recording' || r.status === 'live').length;
+  $('#roomsHint').textContent =
+    `${s.stats.total} 个房间 · ${s.stats.enabled} 个启用${onAir ? ` · ${onAir} 个在播` : ''} · 在播优先排序`;
   // 时长走定点刷新（一次 querySelectorAll 建索引，不做逐行 querySelector——
   // 1381 行 × 每 1.5 秒一次选择器查询是长时间运行卡顿的主因）
   const durMap = {};
@@ -1245,15 +1290,35 @@ if (_tableWrap) {
   _tableWrap.addEventListener('mouseenter', () => { hoverPause = true; });
   _tableWrap.addEventListener('mouseleave', () => {
     hoverPause = false;
-    if (pendingRebuild && lastState) {
-      lastRebuild = 0;
-      render(lastState);
-    }
+    // 悬停期间攒下的变化，鼠标移开后立刻补一次
+    if (lastState) { lastRebuild = 0; render(lastState); }
   });
 }
 
-setInterval(refresh, 1500);
-refresh();
+/* 轮询：按「窗口是否可见 + 有没有在播房间」自适应频率。
+   原来固定 1.5 秒，1300 个房间一次 670KB，挂机 20 小时要拉 32GB；
+   窗口最小化时渲染进程还会被 Chromium 节流，纯属空转。
+   窗口恢复可见的瞬间立刻拉一次 —— 全局导入热键就是靠这条路径弹窗的。 */
+let pollTimer = null;
+function pollDelay() {
+  if (document.hidden) return 5000;   // 最小化/隐藏：降到 5 秒，恢复可见时另有秒级刷新
+  const rooms = (lastState && lastState.rooms) || [];
+  const busy = rooms.some(r => r.status === 'recording' || r.status === 'live');
+  // 可见且空闲时也必须保持较短周期：全局导入热键走的就是这条轮询（2.5s 内必弹）
+  return busy ? 1500 : 2500;
+}
+function schedulePoll(ms) {
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(async () => {
+    try { await refresh(); } catch (e) {}
+    schedulePoll();
+  }, ms == null ? pollDelay() : ms);
+}
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) { lastRoomSig = ''; refresh(); }
+  schedulePoll();
+});
+schedulePoll(0);
 
 /* 深链：?open=<房间id> 直接打开详情，方便定位与分享 */
 const _openId = new URLSearchParams(location.search).get('open');
