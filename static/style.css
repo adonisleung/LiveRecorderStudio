@@ -922,15 +922,17 @@ html.glass{
   --glass-card-hover:rgba(255,255,255,.13);
 }
 html.glass[data-theme="light"]{
-  --glass-panel:rgba(238,240,245,.80);
-  --glass-elev:rgba(248,248,250,.86);
-  --glass-solid:rgba(250,252,251,.93);
-  --glass-line:rgba(255,255,255,.55);
-  --glass-outline:rgba(0,0,0,.16);
-  --glass-hi:inset 0 1px 0 rgba(255,255,255,.78), inset 0 -1px 0 rgba(255,255,255,.24);
-  --glass-shadow:0 12px 30px rgba(12,32,27,.12);
-  --glass-card:rgba(255,255,255,.59);
-  --glass-card-hover:rgba(255,255,255,.75);
+  /* 浅色下层次靠「更白的面板/卡片 + 深色细描边」拉开：
+     白边在白底上等于没有，之前就是因此糊成一片 */
+  --glass-panel:rgba(252,253,253,.74);
+  --glass-elev:rgba(255,255,255,.92);
+  --glass-solid:rgba(250,252,251,.95);
+  --glass-line:rgba(12,32,27,.13);
+  --glass-outline:rgba(12,32,27,.09);
+  --glass-hi:inset 0 1px 0 rgba(255,255,255,.95), inset 0 -1px 0 rgba(12,32,27,.05);
+  --glass-shadow:0 6px 20px rgba(12,32,27,.09);
+  --glass-card:rgba(255,255,255,.88);
+  --glass-card-hover:rgba(255,255,255,1);
 }
 
 /* 背景保持纯净：不加彩色光斑。
