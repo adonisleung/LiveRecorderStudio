@@ -1004,6 +1004,10 @@ function openImportDialog() {
         <button class="btn primary" id="modalOk">导入</button>
       </div>`;
     showModalEl();
+    // showModal() 后浏览器会自动聚焦「第一个可聚焦元素」——也就是头部那个
+    // 快捷键输入框。但打开导入框的意图是贴地址，所以把焦点抢到正文输入框。
+    const ta = $('#importText');
+    if (ta) { try { ta.focus(); } catch (e) {} }
     // 事件绑定
     $('#modalOk').onclick = async () => {
       const text = ($('#importText') || {}).value || '';

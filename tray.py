@@ -221,6 +221,22 @@ def parse_hotkey(text: str):
     return mods | MOD_NOREPEAT, vk
 
 
+def _webview_ctrl(win):
+    """取到 WebView2 控件实例，取不到返回 None。
+
+    pywebview 6.x 里 `window.gui` 指向的是**平台模块**而不是控件，
+    真正的控件挂在 `BrowserView.instances[uid].browser.webview` 上。
+    拿到它才能用「投递不等待」的方式执行脚本。
+    """
+    try:
+        from webview.platforms import winforms as _wf
+        inst = _wf.BrowserView.instances.get(getattr(win, 'uid', None))
+        browser = getattr(inst, 'browser', None)
+        return getattr(browser, 'webview', None)
+    except Exception:
+        return None
+
+
 class WindowHooks:
     """快捷键隐藏/还原 + 可选托盘图标。"""
 
@@ -385,9 +401,26 @@ class WindowHooks:
                     _log('push skipped: no window')
                     return
 
-                windows[0].evaluate_js(script)
-                _log('push ok %.0fms waited=%dms'
-                     % ((time.time() - t0) * 1000, waited))
+                win = windows[0]
+                ctrl = _webview_ctrl(win)
+                if ctrl is not None:
+                    from System import Action
+
+                    def _kick():
+                        try:
+                            ctrl.ExecuteScriptAsync(script)   # 只投递，不等结果
+                        except Exception:
+                            pass
+
+                    # Invoke 只为把「投递」这一步交给 UI 线程，脚本本身异步执行；
+                    # 窗口刚从隐藏/最小化恢复、渲染进程还没活时也能排队等它执行完。
+                    ctrl.Invoke(Action(_kick))
+                    _log('push ok (async) %.0fms waited=%dms'
+                         % ((time.time() - t0) * 1000, waited))
+                else:
+                    win.evaluate_js(script)
+                    _log('push ok (sync) %.0fms waited=%dms'
+                         % ((time.time() - t0) * 1000, waited))
             except Exception as e:
                 _log('push FAILED %s: %s' % (type(e).__name__, e))
             finally:
