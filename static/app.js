@@ -207,10 +207,10 @@ function render(s) {
   foldBtn.dataset.tip = showAllRooms
     ? '只看活跃（收起未开播）'
     : `显示全部${foldedCount ? `（${foldedCount} 个未开播）` : ''}`;
+  // 折叠数量不再写进提示条，只在折叠图标的悬停提示里出现
   $('#roomsHint').innerHTML =
     `${s.stats.total} 个房间 · ${s.stats.enabled} 个启用`
-    + (onAir ? ` · ${onAir} 个在播` : '')
-    + (foldedCount ? ` · 已折叠 ${foldedCount} 个未开播` : '');
+    + (onAir ? ` · ${onAir} 个在播` : '');
   // 时长走定点刷新（一次 querySelectorAll 建索引，不做逐行 querySelector——
   // 1381 行 × 每 1.5 秒一次选择器查询是长时间运行卡顿的主因）
   const durMap = {};
