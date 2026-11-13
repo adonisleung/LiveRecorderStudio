@@ -228,6 +228,8 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke
 /* ---------------- table ---------------- */
 .search{width:190px;font-size:12.5px}
 .table-wrap{overflow:auto;flex:1;position:relative;scrollbar-gutter:stable both-edges}
+/* 折叠态行数按可视高度算过、刚好铺满不溢出，这里直接不预留滚动条空间 */
+.table-wrap.folded{scrollbar-gutter:auto}
 table{width:100%;border-collapse:collapse;font-size:13px;min-width:820px}
 th{text-align:left;font-size:11px;color:var(--on-surface-variant);font-weight:500;letter-spacing:.8px;
   white-space:nowrap;padding:11px 14px;border-bottom:1px solid var(--outline-variant);

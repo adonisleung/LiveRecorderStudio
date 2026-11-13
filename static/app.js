@@ -139,8 +139,14 @@ function render(s) {
   const cfg = s.config || {};
   const all = s.rooms || [];
   // 折叠不是「只留活跃」——那样一屏只有十来行，下面一大片空白很难看。
-  // 改成：活跃房间全留，再按「最近开播」补未开播的，直到铺满一屏。
-  const MIN_ROWS = twoCol ? 32 : 18;
+  // 按可视高度算行数：刚好铺满、且不产生滚动，所以折叠态不需要滚动条。
+  const wrapEl = document.querySelector('.table-wrap');
+  const availH = (wrapEl && wrapEl.clientHeight) || 640;
+  const rowPitch = twoCol ? 57 : 51;              // 行高 + 行间距
+  // 扣掉 .two-col tbody 的上下 padding（8 + 14），否则会溢出十几像素、滚动条又冒出来
+  const usableH = Math.max(0, availH - 26);
+  const MIN_ROWS = Math.max(2, Math.floor(usableH / rowPitch)) * (twoCol ? 2 : 1);
+  if (wrapEl) wrapEl.classList.toggle('folded', !showAllRooms);   // 折叠态不预留滚动条空间
   const activeRooms = all.filter(r => r.status !== 'offline');
   const rooms = showAllRooms
     ? all
