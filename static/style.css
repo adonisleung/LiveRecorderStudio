@@ -327,11 +327,8 @@ td:last-child .link-btn+.link-btn{margin-left:2px}
   border:1px solid var(--outline-variant);white-space:nowrap}
 .statusbar .sb-note{font-size:10px;opacity:.55;background:none;border-color:transparent}
 .muted{color:var(--dim)}
-/* 列表折叠提示：默认收起未开播房间，这里给个可点的展开入口 */
-.hint-fold{opacity:.65}
-.link-btn{background:none;border:0;padding:0 0 0 8px;font:inherit;color:var(--primary);
-  cursor:pointer;text-decoration:underline;text-underline-offset:2px}
-.link-btn:hover{opacity:.75}
+/* 图标按钮用 hidden 属性隐藏时，别被 .btn 的 display:inline-flex 顶掉 */
+.panel-actions .btn[hidden]{display:none}
 
 /* ---------------- dialogs ---------------- */
 /* 原生 <dialog> + showModal()：top layer、focus trap、Esc 关闭、背景 inert

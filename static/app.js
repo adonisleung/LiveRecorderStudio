@@ -81,6 +81,11 @@ const ICON = {
   rec: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/></svg>',
   stop: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><rect x="8.6" y="8.6" width="6.8" height="6.8" rx="1.4" fill="currentColor" stroke="none"/></svg>',
   trash: '<svg viewBox="0 0 24 24"><path d="M4 7h16M9.5 7V5.2A1.2 1.2 0 0 1 10.7 4h2.6a1.2 1.2 0 0 1 1.2 1.2V7"/><path d="M6.5 7l.8 11.4A2 2 0 0 0 9.3 20h5.4a2 2 0 0 0 2-1.6L17.5 7"/><path d="M10.5 11v5M13.5 11v5"/></svg>',
+  // 布局：两个竖条 = 双列，两个横条 = 单列
+  grid2: '<svg viewBox="0 0 24 24"><rect x="3.2" y="4" width="7.6" height="16" rx="1.6"/><rect x="13.2" y="4" width="7.6" height="16" rx="1.6"/></svg>',
+  grid1: '<svg viewBox="0 0 24 24"><rect x="3.2" y="4" width="17.6" height="7" rx="1.6"/><rect x="3.2" y="13" width="17.6" height="7" rx="1.6"/></svg>',
+  eye: '<svg viewBox="0 0 24 24"><path d="M2.2 12S6 6.2 12 6.2 21.8 12 21.8 12 18 17.8 12 17.8 2.2 12 2.2 12z"/><circle cx="12" cy="12" r="2.6"/></svg>',
+  eyeOff: '<svg viewBox="0 0 24 24"><path d="M2.2 12S6 6.2 12 6.2 21.8 12 21.8 12 18 17.8 12 17.8 2.2 12 2.2 12z"/><circle cx="12" cy="12" r="2.6"/><path d="M4.2 20.2 19.8 3.8"/></svg>',
 };
 
 /* ---------- 列表 ---------- */
@@ -194,13 +199,18 @@ function render(s) {
     $('#empty').classList.toggle('hidden', all.length > 0);
   }
   const onAir = rooms.filter(r => r.status === 'recording' || r.status === 'live').length;
-  const foldHtml = showAllRooms
-    ? (all.some(r => r.status === 'offline') ? ' · <button class="link-btn" data-act="toggle-fold">只看活跃</button>' : '')
-    : (foldedCount ? ` · <span class="hint-fold">已折叠 ${foldedCount} 个未开播</span><button class="link-btn" data-act="toggle-fold">显示全部</button>` : '');
+  const hasOffline = all.some(r => r.status === 'offline');
+  // 折叠开关做成纯图标，排在布局按钮左边；没有未开播房间时整颗按钮隐藏
+  const foldBtn = $('#btnFold');
+  foldBtn.hidden = !hasOffline;
+  foldBtn.innerHTML = showAllRooms ? ICON.eyeOff : ICON.eye;
+  foldBtn.dataset.tip = showAllRooms
+    ? '只看活跃（收起未开播）'
+    : `显示全部${foldedCount ? `（${foldedCount} 个未开播）` : ''}`;
   $('#roomsHint').innerHTML =
     `${s.stats.total} 个房间 · ${s.stats.enabled} 个启用`
     + (onAir ? ` · ${onAir} 个在播` : '')
-    + foldHtml;
+    + (foldedCount ? ` · 已折叠 ${foldedCount} 个未开播` : '');
   // 时长走定点刷新（一次 querySelectorAll 建索引，不做逐行 querySelector——
   // 1381 行 × 每 1.5 秒一次选择器查询是长时间运行卡顿的主因）
   const durMap = {};
@@ -255,6 +265,8 @@ function render(s) {
 function toggleFold() {
   showAllRooms = !showAllRooms;
   localStorage.setItem('lrs.showAll', showAllRooms ? '1' : '0');
+  // 先给图标即时反馈，再重建表格
+  $('#btnFold').innerHTML = showAllRooms ? ICON.eyeOff : ICON.eye;
   $('#roomRows').innerHTML = '';
   rowSigCache.clear();
   lastOrderSig = '';
@@ -262,9 +274,7 @@ function toggleFold() {
   lastRebuild = 0;
   if (lastState) render(lastState);
 }
-$('#roomsHint').addEventListener('click', (e) => {
-  if (e.target.dataset && e.target.dataset.act === 'toggle-fold') toggleFold();
-});
+$('#btnFold').onclick = toggleFold;
 
 async function refresh() {
   try { render(await api('/api/state')); }
@@ -725,8 +735,8 @@ function syncTips() {
 
 function applyLayout() {
   $('.table-wrap').classList.toggle('two-col', twoCol);
-  // 文字显示「当前布局」，点一下切到另一种——之前写的是下一步动作，看着像没变
-  $('#btnLayoutText').textContent = twoCol ? '双列' : '单列';
+  // 纯图标：双列画两个竖条、单列画两个横条，一眼能看出当前是什么布局
+  $('#btnLayout').innerHTML = twoCol ? ICON.grid2 : ICON.grid1;
   $('#btnLayout').dataset.tip = twoCol ? '当前双列，点击切换为单列' : '当前单列，点击切换为双列';
   $('#btnLayout').classList.toggle('active', twoCol);
   localStorage.setItem('lrs.twocol', twoCol ? '1' : '0');
