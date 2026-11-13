@@ -906,24 +906,29 @@ tbody tr:hover{background:var(--state-hover)}
    所以只给「面积小、且不随列表滚动重绘」的元素开模糊：
    顶栏 / 侧栏 / 弹窗。列表面板只做半透明，避免滚动时每帧重算。 */
 html.glass{
-  --glass-panel:rgba(18,23,29,.48);
-  --glass-elev:rgba(23,29,36,.70);
-  --glass-solid:rgba(13,17,21,.90);      /* 需要压住背后内容的地方 */
-  --glass-line:rgba(255,255,255,.085);
-  --glass-hi:inset 0 1px 0 rgba(255,255,255,.07);
+  /* 参数对齐 wisland（PySide6 毛玻璃灵动岛）的 dark 色板：
+     tint 47% / card 10% / rim 顶部 24% + 底部 5% / outline 27% */
+  --glass-panel:rgba(28,28,34,.47);
+  --glass-elev:rgba(36,36,40,.72);
+  --glass-solid:rgba(16,16,20,.90);      /* 需要压住背后内容的地方 */
+  --glass-line:rgba(255,255,255,.10);
+  --glass-outline:rgba(0,0,0,.28);
+  /* 双层 rim：上沿亮、下沿弱，玻璃才有厚度 */
+  --glass-hi:inset 0 1px 0 rgba(255,255,255,.24), inset 0 -1px 0 rgba(255,255,255,.05);
   --glass-shadow:0 12px 36px rgba(0,0,0,.42);
-  --glass-card:rgba(255,255,255,.05);
-  --glass-card-hover:rgba(255,255,255,.09);
+  --glass-card:rgba(255,255,255,.10);
+  --glass-card-hover:rgba(255,255,255,.13);
 }
 html.glass[data-theme="light"]{
-  --glass-panel:rgba(255,255,255,.58);
-  --glass-elev:rgba(255,255,255,.80);
+  --glass-panel:rgba(238,240,245,.80);
+  --glass-elev:rgba(248,248,250,.86);
   --glass-solid:rgba(250,252,251,.93);
-  --glass-line:rgba(12,32,27,.10);
-  --glass-hi:inset 0 1px 0 rgba(255,255,255,.75);
-  --glass-shadow:0 12px 30px rgba(12,32,27,.10);
-  --glass-card:rgba(255,255,255,.58);
-  --glass-card-hover:rgba(255,255,255,.85);
+  --glass-line:rgba(255,255,255,.55);
+  --glass-outline:rgba(0,0,0,.16);
+  --glass-hi:inset 0 1px 0 rgba(255,255,255,.78), inset 0 -1px 0 rgba(255,255,255,.24);
+  --glass-shadow:0 12px 30px rgba(12,32,27,.12);
+  --glass-card:rgba(255,255,255,.59);
+  --glass-card-hover:rgba(255,255,255,.75);
 }
 
 /* 环境光斑：圆心放在画面内，让左上/右下真正有颜色，中间淡出 */
@@ -948,7 +953,7 @@ html.glass .topbar{
 html.glass .panel{
   background:var(--glass-panel);
   border:1px solid var(--glass-line);
-  box-shadow:var(--glass-shadow),var(--glass-hi);
+  box-shadow:var(--glass-shadow),var(--glass-hi),0 0 0 1px var(--glass-outline);
 }
 
 /* 侧栏浮在列表上方，日志滚动频率低，可以开轻模糊 */
@@ -967,7 +972,7 @@ html.glass .modal-card{
   backdrop-filter:blur(26px) saturate(160%);
   -webkit-backdrop-filter:blur(26px) saturate(160%);
   border:1px solid var(--glass-line);
-  box-shadow:0 26px 64px rgba(0,0,0,.48),var(--glass-hi);
+  box-shadow:0 26px 64px rgba(0,0,0,.48),var(--glass-hi),0 0 0 1px var(--glass-outline);
 }
 html.glass .modal::backdrop{
   background:rgba(0,0,0,.42);
@@ -979,6 +984,6 @@ html.glass .modal::backdrop{
 html.glass .table-wrap.two-col tbody tr{
   background:var(--glass-card);
   border-color:var(--glass-line);
-  box-shadow:var(--glass-hi);
+  box-shadow:var(--glass-hi),0 0 0 1px var(--glass-outline);
 }
 html.glass .table-wrap.two-col tbody tr:hover{background:var(--glass-card-hover)}
