@@ -331,46 +331,18 @@ class WindowHooks:
 
     @staticmethod
     def _force_foreground(hwnd) -> None:
-        """把窗口真正拉到「看得见的最上层」。
+        """置前：只用非阻塞的标准 API。
 
-        关键：窗口刚从 SW_HIDE / 最小化恢复时，GetForegroundWindow() 仍可能
-        返回这个 hwnd，但它并不在 Z-order 顶层。绝不能因为 fg == hwnd 就
-        跳过置前 —— 那样窗口虽然 IsWindowVisible=True，却压在别的窗口后面，
-        用户看到的就是「按导入热键没反应，再按一次还原键才出现」。
+        show() 是在热键消息循环线程里同步调用的，绝不能在这里做
+        AttachThreadInput / SwitchToThisWindow / TOPMOST 翻转这类跨线程
+        同步操作 —— 隐藏态恢复时会等 GUI 线程，可能造成界面互锁（用户
+        实测「按 Alt+F2 后卡死、关不掉」，进程 Responding 仍为 True）。
+        窗口的显示由 ShowWindow 完成，这里只补一个置前，失败就算了。
         """
-        # 1) 瞬间置顶再取消：不依赖前台锁，直接把窗口提到 Z-order 顶层，
-        #    又不会让它长期霸占置顶。这是绕过 SetForegroundWindow 被拒的可靠做法。
-        SWP = 0x0001 | 0x0002 | 0x0040     # NOSIZE | NOMOVE | SHOWWINDOW
         try:
-            user32.ShowWindow(hwnd, SW_SHOW)
-            user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, SWP)   # HWND_TOPMOST
-            user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, SWP)   # HWND_NOTOPMOST
-        except Exception as e:
-            _hk_log(f'topmost flip failed: {type(e).__name__}: {e}')
-        # 2) 强制激活（能绕开 Windows 的前台锁）
-        try:
-            user32.SwitchToThisWindow(hwnd, True)
+            user32.SetForegroundWindow(hwnd)
         except Exception:
             pass
-        # 3) 常规置前兜底：attach 到前台线程后再 SetForegroundWindow
-        try:
-            fg = user32.GetForegroundWindow()
-            cur_tid = kernel32.GetCurrentThreadId()
-            fg_tid = user32.GetWindowThreadProcessId(fg, None) if fg else 0
-            attached = False
-            if fg_tid and fg_tid != cur_tid:
-                attached = bool(user32.AttachThreadInput(cur_tid, fg_tid, True))
-            try:
-                user32.SetForegroundWindow(hwnd)
-                user32.BringWindowToTop(hwnd)
-            finally:
-                if attached:
-                    user32.AttachThreadInput(cur_tid, fg_tid, False)
-        except Exception:
-            try:
-                user32.SetForegroundWindow(hwnd)
-            except Exception:
-                pass
 
     def set_borderless(self) -> bool:
         """去掉标题栏并缩成小弹窗（居中显示），视觉上独立于主窗口。"""
@@ -662,9 +634,10 @@ class WindowHooks:
                             f'self_hidden={self._hidden} hwnd={hwnd} '
                             f'vis={bool(hwnd) and bool(user32.IsWindowVisible(hwnd))} '
                             f'fg={user32.GetForegroundWindow()}')
-                    # 按导入热键就一定要把窗口摆到眼前：无条件 show()，
-                    # 不再依赖任一状态判断。可见态调一次只是置前，没有副作用。
-                    self.show()
+                    # 只在确实需要恢复窗口时才调 show()：可见态不碰窗口，
+                    # 把跨线程 GUI 操作降到最少（消息循环里做多了会互锁）。
+                    if iconic or hidden:
+                        self.show()
                     _hk_log(f'id=3 after show: '
                             f'vis={bool(hwnd) and bool(user32.IsWindowVisible(hwnd))} '
                             f'iconic={bool(hwnd) and bool(user32.IsIconic(hwnd))} '
@@ -692,20 +665,6 @@ class WindowHooks:
                         except Exception as e:
                             _hk_log(f'id=3 evaluate_js FAILED {type(e).__name__}: {e}')
                             self.import_requested = True  # 回退：走轮询
-                        # 延迟二次确认：万一 show() 之后窗口又被别处（例如前端
-                        # close 事件里的 /api/window hide）藏回去，补一次恢复 +
-                        # 幂等推送。hotkeyOpenImport 已开着时只聚焦，不会重复弹。
-                        time.sleep(0.25)
-                        h = self._last_hwnd
-                        if h and (not user32.IsWindowVisible(h) or user32.IsIconic(h)):
-                            _hk_log('id=3 window re-hidden -> re-show')
-                            self.show()
-                            try:
-                                import webview as _wv
-                                if _wv.windows:
-                                    _wv.windows[0].evaluate_js(_script)
-                            except Exception:
-                                self.import_requested = True
                     threading.Thread(target=_fire, daemon=True, name='lrs-import-js').start()
                 return 0
             if msg == WM_TRAY:
