@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import ctypes
+import os
 import re
 import threading
 import time
@@ -125,7 +126,19 @@ user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BO
 user32.AttachThreadInput.restype = wintypes.BOOL
 user32.BringWindowToTop.argtypes = [wintypes.HWND]
 user32.BringWindowToTop.restype = wintypes.BOOL
+user32.SwitchToThisWindow.argtypes = [wintypes.HWND, wintypes.BOOL]
 kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+
+
+def _hk_log(msg: str):
+    """热键链路诊断日志：出问题时读 %TEMP%\\lrs_hotkey.log，不用再猜。"""
+    try:
+        import tempfile
+        with open(os.path.join(tempfile.gettempdir(), 'lrs_hotkey.log'),
+                  'a', encoding='utf-8') as f:
+            f.write(f'{time.strftime("%H:%M:%S")} {msg}\n')
+    except Exception:
+        pass
 
 
 def _int_resource(value: int):
@@ -318,16 +331,30 @@ class WindowHooks:
 
     @staticmethod
     def _force_foreground(hwnd) -> None:
-        """把窗口真正拉到前台。
+        """把窗口真正拉到「看得见的最上层」。
 
-        非前台进程直接调 SetForegroundWindow 会被 Windows 的前台锁拒绝
-        （返回 0、窗口不动），表现就是「按了热键窗口其实显示了、但被别的
-        窗口压在后面，看着像没弹」。标准解法：临时 attach 到前台窗口线程。
+        关键：窗口刚从 SW_HIDE / 最小化恢复时，GetForegroundWindow() 仍可能
+        返回这个 hwnd，但它并不在 Z-order 顶层。绝不能因为 fg == hwnd 就
+        跳过置前 —— 那样窗口虽然 IsWindowVisible=True，却压在别的窗口后面，
+        用户看到的就是「按导入热键没反应，再按一次还原键才出现」。
         """
+        # 1) 瞬间置顶再取消：不依赖前台锁，直接把窗口提到 Z-order 顶层，
+        #    又不会让它长期霸占置顶。这是绕过 SetForegroundWindow 被拒的可靠做法。
+        SWP = 0x0001 | 0x0002 | 0x0040     # NOSIZE | NOMOVE | SHOWWINDOW
+        try:
+            user32.ShowWindow(hwnd, SW_SHOW)
+            user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, SWP)   # HWND_TOPMOST
+            user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, SWP)   # HWND_NOTOPMOST
+        except Exception as e:
+            _hk_log(f'topmost flip failed: {type(e).__name__}: {e}')
+        # 2) 强制激活（能绕开 Windows 的前台锁）
+        try:
+            user32.SwitchToThisWindow(hwnd, True)
+        except Exception:
+            pass
+        # 3) 常规置前兜底：attach 到前台线程后再 SetForegroundWindow
         try:
             fg = user32.GetForegroundWindow()
-            if fg == hwnd:
-                return
             cur_tid = kernel32.GetCurrentThreadId()
             fg_tid = user32.GetWindowThreadProcessId(fg, None) if fg else 0
             attached = False
@@ -600,6 +627,7 @@ class WindowHooks:
         try:
             if msg == WM_HOTKEY:
                 hid = int(wparam)
+                _hk_log(f'WM_HOTKEY id={hid}')
                 if hid == 1:
                     self.hide()
                 elif hid == 2:
@@ -617,8 +645,17 @@ class WindowHooks:
                     # 不是隐藏，否则会变成「最小化按热键 → 关框 → 窗口消失」。
                     from_hidden = self._hidden
                     self.import_from_hidden = from_hidden
-                    if iconic or hidden:
-                        self.show()
+                    _hk_log(f'id=3 before: hidden={hidden} iconic={iconic} '
+                            f'self_hidden={self._hidden} hwnd={hwnd} '
+                            f'vis={bool(hwnd) and bool(user32.IsWindowVisible(hwnd))} '
+                            f'fg={user32.GetForegroundWindow()}')
+                    # 按导入热键就一定要把窗口摆到眼前：无条件 show()，
+                    # 不再依赖任一状态判断。可见态调一次只是置前，没有副作用。
+                    self.show()
+                    _hk_log(f'id=3 after show: '
+                            f'vis={bool(hwnd) and bool(user32.IsWindowVisible(hwnd))} '
+                            f'iconic={bool(hwnd) and bool(user32.IsIconic(hwnd))} '
+                            f'fg={user32.GetForegroundWindow()}')
                     # 走前端唯一入口 hotkeyOpenImport：导入框已开着时它会把焦点
                     # 还给输入框；直调 openImportDialog 会被 isModalOpen() 直接
                     # return，连按热键看起来就是「按了没反应」。
@@ -635,8 +672,27 @@ class WindowHooks:
                             import webview as _wv
                             if _wv.windows:
                                 _wv.windows[0].evaluate_js(_script)
-                        except Exception:
+                                _hk_log('id=3 evaluate_js ok')
+                            else:
+                                _hk_log('id=3 no webview window -> poll')
+                                self.import_requested = True
+                        except Exception as e:
+                            _hk_log(f'id=3 evaluate_js FAILED {type(e).__name__}: {e}')
                             self.import_requested = True  # 回退：走轮询
+                        # 延迟二次确认：万一 show() 之后窗口又被别处（例如前端
+                        # close 事件里的 /api/window hide）藏回去，补一次恢复 +
+                        # 幂等推送。hotkeyOpenImport 已开着时只聚焦，不会重复弹。
+                        time.sleep(0.25)
+                        h = self._last_hwnd
+                        if h and (not user32.IsWindowVisible(h) or user32.IsIconic(h)):
+                            _hk_log('id=3 window re-hidden -> re-show')
+                            self.show()
+                            try:
+                                import webview as _wv
+                                if _wv.windows:
+                                    _wv.windows[0].evaluate_js(_script)
+                            except Exception:
+                                self.import_requested = True
                     threading.Thread(target=_fire, daemon=True, name='lrs-import-js').start()
                 return 0
             if msg == WM_TRAY:
