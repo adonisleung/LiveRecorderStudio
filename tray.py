@@ -486,11 +486,18 @@ class WindowHooks:
             raise OSError('创建消息窗口失败')
 
     def _register_hotkeys(self):
-        self._apply_keys(self.want_hide, self.want_show)
+        self._apply_keys(self.want_hide, self.want_show, self.want_import)
 
-    def rebind(self, hide_text: str, show_text: str, import_text: str = '') -> dict:
+    def rebind(self, hide_text: str, show_text: str,
+               import_text: str | None = None) -> dict:
         self.want_hide, self.want_show = hide_text or '', show_text or ''
-        self.want_import = import_text or ''
+        # 「不传第三个参数」= 保留原来的导入键，绝不能无条件清空。
+        # 旧版这里写 self.want_import = import_text or ''，而 resume() 只传
+        # hide/show 两个参数：每次导入框里的快捷键输入框失焦（suspend→resume），
+        # Alt+1 就被永久注销，直到重启或改键才回来。表现就是「用过一次导入框
+        # 之后，Alt+1 再无反应，但 Alt+F1/F2 一直正常」。
+        if import_text is not None:
+            self.want_import = import_text or ''
         if not self._hwnd_msg:
             return {'hide': '', 'show': '', 'import': '', 'want_hide': self.want_hide,
                     'want_show': self.want_show, 'want_import': self.want_import}
@@ -516,7 +523,8 @@ class WindowHooks:
         （还会把窗口藏了），永远录不进去。失焦/保存后调 resume 恢复。
         """
         with self._lock:
-            self._pending = ('__suspend__', '__suspend__')
+            # 带上导入键，避免 _pending 退化成二元组后 _apply_keys 少收一个参数
+            self._pending = ('__suspend__', '__suspend__', self.want_import)
             self._rebind_result = None
             self._rebind_done.clear()
         user32.PostMessageW(self._hwnd_msg, WM_REBIND, 0, 0)
@@ -524,21 +532,26 @@ class WindowHooks:
         return {'ok': True, 'hide': '', 'show': '', 'suspended': True}
 
     def resume(self) -> dict:
-        """恢复被 suspend 卸掉的全局热键（用最近一次想要的组合）。"""
-        res = self.rebind(self.want_hide, self.want_show)
+        """恢复被 suspend 卸掉的全局热键（三个键都要，别漏了导入键）。"""
+        res = self.rebind(self.want_hide, self.want_show, self.want_import)
         res['ok'] = True
         return res
 
     def _apply_keys(self, hide_text: str, show_text: str, import_text: str = '') -> dict:
         for hid in (1, 2, 3):
             user32.UnregisterHotKey(self._hwnd_msg, hid)
-        if hide_text == '__suspend__':      # 录入期间：两个键都不注册，按键直达输入框
+        if hide_text == '__suspend__':      # 录入期间：三个键都不注册，按键直达输入框
             self.hide_key = self.show_key = self.import_key = ''
+            _hk_log('keys SUSPENDED (all unregistered)')
             return {'hide': '', 'show': '', 'want_hide': self.want_hide,
                     'want_show': self.want_show, 'suspended': True}
         self.hide_key = self._try_bind(1, hide_text, HIDE_KEYS)
         self.show_key = self._try_bind(2, show_text, SHOW_KEYS)
-        self.import_key = self._try_bind(3, import_text or self.want_import, []) if (import_text or self.want_import) else ''
+        want = import_text or self.want_import
+        self.import_key = self._try_bind(3, want, []) if want else ''
+        _hk_log(f'keys bound: hide={self.hide_key or "-"} '
+                f'show={self.show_key or "-"} import={self.import_key or "-"} '
+                f'want_import={self.want_import or "-"}')
         if not self.hide_key:
             # 连隐藏键都注册不上：挂托底图标，别让窗口被藏死找不回来
             self.used_tray = True
