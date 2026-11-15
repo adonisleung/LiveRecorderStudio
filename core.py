@@ -979,6 +979,7 @@ class Engine:
         self.err_paths: dict[str, Path] = {}
         self.pool = ThreadPoolExecutor(max_workers=max(2, self.cfg['concurrency']),
                                        thread_name_prefix='probe')
+        self._shutting_down = False       # 退出收尾中：禁止后台线程再写 rooms.json
         self._load_rooms()
         # 目录归档放后台线程：上千房间逐个探测旧目录会拖慢启动好几秒，
         # 先把窗口亮出来，归档悄悄做完即可（失败只记日志）
@@ -992,6 +993,53 @@ class Engine:
             self.log('warn', f'目录归档跳过：{type(e).__name__}: {e}')
 
     # ---------- 持久化 ----------
+    @staticmethod
+    def _atomic_write(path: Path, text: str):
+        """原子落盘：先写同目录临时文件并 fsync，再 os.replace 换掉目标。
+
+        Path.write_text 会先把目标 truncate 成 0 字节再写内容，中间一旦被
+        os._exit / 强制重启 / 断电打断，rooms.json 就变成空文件，下次启动
+        整个房间列表全丢。os.replace 在同一分区是原子操作：任意时刻目标
+        只能是「旧的完整版」或「新的完整版」，不存在空文件或半截 JSON。
+        """
+        tmp = path.with_name(path.name + '.tmp')
+        with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+
+    @staticmethod
+    def _valid_rooms(path: Path) -> list | None:
+        """能解析成 list 才认；0 字节、半截 JSON、非数组都算损坏。"""
+        try:
+            if not path.is_file() or path.stat().st_size == 0:
+                return None
+            data = json.loads(path.read_text(encoding='utf-8'))
+            return data if isinstance(data, list) else None
+        except Exception:
+            return None
+
+    def _rotate_backup(self, path: Path):
+        """覆盖前留一份上一版，保留最近两版（.bak / .bak2）。
+
+        顺带也是「误点清空全部」的后悔药：清空时写的是 []，但清空前
+        的完整列表已经躺在 .bak 里了。
+        """
+        try:
+            if self._valid_rooms(path) is None:
+                return                      # 主文件已损坏，别拿坏文件当备份
+            blob = path.read_bytes()
+            bak1 = path.with_name(path.name + '.bak')
+            bak2 = path.with_name(path.name + '.bak2')
+            if self._valid_rooms(bak1) is not None:
+                os.replace(bak1, bak2)      # 上一版顺移成上上版
+            tmp = bak1.with_name(bak1.name + '.tmp')
+            tmp.write_bytes(blob)
+            os.replace(tmp, bak1)
+        except Exception as e:
+            self.log('warn', f'房间列表备份失败: {e}')
+
     def _load_config(self) -> dict:
         cfg = dict(DEFAULT_CONFIG)
         try:
@@ -1011,48 +1059,92 @@ class Engine:
                     continue
                 if k in DEFAULT_CONFIG:
                     self.cfg[k] = v
-            self.config_path.write_text(
-                json.dumps(self.cfg, ensure_ascii=False, indent=2), encoding='utf-8')
+            self._atomic_write(
+                self.config_path,
+                json.dumps(self.cfg, ensure_ascii=False, indent=2))
             return dict(self.cfg)
 
     def rooms_path(self) -> Path:
         return self.base / 'rooms.json'
 
     def _load_rooms(self):
+        path = self.rooms_path()
+        data = self._valid_rooms(path)
+        if data is None:
+            # 主文件空了/坏了：优先用备份恢复，并立刻把好数据写回主文件。
+            # 绝不在这里用空列表覆盖，否则最后一份可恢复的痕迹也会被抹掉。
+            for bak in (path.with_name(path.name + '.bak'),
+                        path.with_name(path.name + '.bak2')):
+                rec = self._valid_rooms(bak)
+                if rec:
+                    self.log('warn', f'房间列表损坏，已从 {bak.name} 恢复 {len(rec)} 个房间')
+                    try:
+                        self._atomic_write(
+                            path, json.dumps(rec, ensure_ascii=False, indent=2))
+                    except Exception as e:
+                        self.log('error', f'恢复写回失败: {e}')
+                    data = rec
+                    break
+        if data is None:
+            self.log('error', '房间列表读取失败：主文件与备份均不可用，本次不覆盖文件')
+            return
         try:
-            if self.rooms_path().is_file():
-                data = json.loads(self.rooms_path().read_text(encoding='utf-8'))
-                migrated = False
-                for item in data:
-                    r = Room(**{k: v for k, v in item.items() if k in Room.__dataclass_fields__})
-                    r.status = 'idle'
-                    r.file = ''
-                    r.started_at = 0
-                    # 名字只来自 alias(手改) / anchor(抖音解析)，备注只作个人记忆。
-                    # 早期为回滚「备注被搬成显示名」临时加的两条自动互填已撤销：
-                    # 它们分不清「历史误改」和「正常新房间」——前者会把主播名写进
-                    # 空备注（每次启动都写），后者会把只填了显示名的房间名字搬走。
-                    # 旧版解析失败时用房间号冒充昵称，清掉，别再显示一串数字
-                    if is_junk_anchor(r.anchor):
-                        if r.anchor:
-                            r.anchor = ''
-                            migrated = True
-                    self.rooms[r.id] = r
-                if migrated:
-                    self._save_rooms()
-                    self.log('info', '已归位历史字段：备注、显示名称与无效昵称')
+            migrated = False
+            for item in data:
+                r = Room(**{k: v for k, v in item.items() if k in Room.__dataclass_fields__})
+                r.status = 'idle'
+                r.file = ''
+                r.started_at = 0
+                # 名字只来自 alias(手改) / anchor(抖音解析)，备注只作个人记忆。
+                # 早期为回滚「备注被搬成显示名」临时加的两条自动互填已撤销：
+                # 它们分不清「历史误改」和「正常新房间」——前者会把主播名写进
+                # 空备注（每次启动都写），后者会把只填了显示名的房间名字搬走。
+                # 旧版解析失败时用房间号冒充昵称，清掉，别再显示一串数字
+                if is_junk_anchor(r.anchor):
+                    if r.anchor:
+                        r.anchor = ''
+                        migrated = True
+                self.rooms[r.id] = r
+            if migrated:
+                self._save_rooms()
+                self.log('info', '已归位历史字段：备注、显示名称与无效昵称')
         except Exception as e:
-            self.log('error', f'房间列表读取失败: {e}')
+            self.log('error', f'房间列表解析失败: {e}')
+
+    def _write_rooms(self):
+        """真正落盘（调用方必须持 self.lock）。"""
+        data = [{k: getattr(r, k) for k in
+                 ('id', 'url', 'note', 'quality', 'enabled', 'alias', 'anchor', 'stop_until')}
+                for r in self.rooms.values()]
+        path = self.rooms_path()
+        self._rotate_backup(path)
+        self._atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2))
 
     def _save_rooms(self):
-        try:
-            data = [{k: getattr(r, k) for k in
-                     ('id', 'url', 'note', 'quality', 'enabled', 'alias', 'anchor', 'stop_until')}
-                    for r in self.rooms.values()]
-            self.rooms_path().write_text(
-                json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
-        except Exception as e:
-            self.log('error', f'房间列表保存失败: {e}')
+        # 串行化所有写盘：HTTP 线程增删改、后台探测线程改昵称可能同时触发，
+        # 两次 write_text 交错会把 JSON 写坏。
+        with self.lock:
+            if self._shutting_down:
+                return                      # 退出收尾阶段只认最后一次同步落盘
+            try:
+                self._write_rooms()
+            except Exception as e:
+                self.log('error', f'房间列表保存失败: {e}')
+
+    def flush_rooms(self):
+        """退出前最后一次同步落盘，并封住后台线程的后续写入。
+
+        之前的退出流程是 halt_and_finalize → sleep 0.1 → os._exit(0)，
+        硬退出不给任何线程收尾时间；只要探测线程正好在写 260KB 的
+        rooms.json，文件就会被 truncate 成 0 字节。这里把最后的写入
+        同步做完再放行 os._exit。
+        """
+        with self.lock:
+            self._shutting_down = True
+            try:
+                self._write_rooms()
+            except Exception as e:
+                self.log('error', f'退出前房间列表保存失败: {e}')
 
     # ---------- 日志 ----------
     def log(self, level: str, text: str):
@@ -1169,6 +1261,9 @@ class Engine:
         不能用 stop() 那条路径——它逐个 wait(timeout=3) 再 join，
         多房间时会把「退出」拖到十几秒，用户会以为程序卡死。
         """
+        # 退出第一件事：同步把房间列表安全落盘，并封住后台写盘线程。
+        # 之后所有路径都在几秒内 os._exit(0)，不会再有半截写入的机会。
+        self.flush_rooms()
         self.running = False
         self.stop_event.set()
         items = list(self.processes.items())

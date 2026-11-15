@@ -18,7 +18,7 @@ DIST = Path(os.environ.get('LRS_DISTPATH', str(ROOT / 'dist'))) / 'LiveRecorderS
 
 
 # 这些是用户数据，重建时必须原样带过来（否则升级一次丢一次房间列表）
-CARRY = ('rooms.json', 'config.json')
+CARRY = ('rooms.json', 'config.json', 'rooms.json.bak', 'rooms.json.bak2')
 
 
 def _read_carry() -> dict:
