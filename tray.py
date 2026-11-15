@@ -13,6 +13,7 @@ from __future__ import annotations
 import ctypes
 import re
 import threading
+import time
 from ctypes import wintypes
 
 user32 = ctypes.windll.user32
@@ -102,6 +103,8 @@ user32.CreatePopupMenu.restype = wintypes.HMENU
 user32.TrackPopupMenu.restype = ctypes.c_int
 user32.RegisterHotKey.restype = wintypes.BOOL
 user32.IsWindowVisible.restype = wintypes.BOOL
+user32.IsWindowVisible.argtypes = [wintypes.HWND]
+user32.SetForegroundWindow.argtypes = [wintypes.HWND]
 user32.IsIconic.restype = wintypes.BOOL
 user32.IsIconic.argtypes = [wintypes.HWND]
 user32.GetWindowLongW.restype = ctypes.c_long
@@ -113,6 +116,16 @@ user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int,
                                 ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
 user32.GetMessageW.restype = ctypes.c_int
 shell32.Shell_NotifyIconW.restype = wintypes.BOOL
+# 前台锁绕过：x64 下不声明 argtypes 会把 HWND 截成 32 位，必须显式声明
+user32.GetForegroundWindow.restype = wintypes.HWND
+user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND,
+                                            ctypes.POINTER(wintypes.DWORD)]
+user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+user32.AttachThreadInput.restype = wintypes.BOOL
+user32.BringWindowToTop.argtypes = [wintypes.HWND]
+user32.BringWindowToTop.restype = wintypes.BOOL
+kernel32.GetCurrentThreadId.restype = wintypes.DWORD
 
 
 def _int_resource(value: int):
@@ -236,6 +249,22 @@ class WindowHooks:
         self._thread = threading.Thread(target=self._run, daemon=True, name='win-hooks')
         self._thread.start()
         self._ready.wait(wait)      # 等热键注册结果，界面才能报出组合键
+        # 窗口创建后缓存一次真实句柄。_wndproc（消息循环线程）里绝不能做
+        # EnumWindows：GetWindowTextW 会跨线程 SendMessage 到 GUI 线程，
+        # GUI 线程忙时会把热键消息循环堵死（历史上「最小化热键卡死」）。
+        threading.Thread(target=self._cache_hwnd, daemon=True,
+                         name='lrs-hwnd-cache').start()
+
+    def _cache_hwnd(self):
+        """后台重试拿主窗口句柄；窗口刚创建时标题/句柄可能还没就绪。"""
+        for _ in range(10):
+            time.sleep(0.8)
+            if not self._running:
+                return
+            hwnd = self._find_main()
+            if hwnd:
+                self._last_hwnd = hwnd
+                return
 
     def stop(self):
         self._running = False
@@ -268,6 +297,9 @@ class WindowHooks:
         hwnd = self._last_hwnd or self._find_main()
         if not hwnd:
             return False
+        # 缓存真实窗口句柄：最小化检测也要用它。以前只有 hide() 才写这个字段，
+        # 用户点任务栏最小化时它恒为 0，IsIconic(0) 自然永远为假。
+        self._last_hwnd = hwnd
         # 最小化时必须先 SW_RESTORE 才能正常显示和置前
         if user32.IsIconic(hwnd):
             user32.ShowWindow(hwnd, SW_RESTORE)
@@ -279,10 +311,39 @@ class WindowHooks:
             user32.ShowWindow(hwnd, SW_SHOW)
         else:
             user32.ShowWindow(hwnd, SW_SHOW)
-        user32.SetForegroundWindow(hwnd)
+        self._force_foreground(hwnd)
         self._hidden = False
         self._del_icon()
         return True
+
+    @staticmethod
+    def _force_foreground(hwnd) -> None:
+        """把窗口真正拉到前台。
+
+        非前台进程直接调 SetForegroundWindow 会被 Windows 的前台锁拒绝
+        （返回 0、窗口不动），表现就是「按了热键窗口其实显示了、但被别的
+        窗口压在后面，看着像没弹」。标准解法：临时 attach 到前台窗口线程。
+        """
+        try:
+            fg = user32.GetForegroundWindow()
+            if fg == hwnd:
+                return
+            cur_tid = kernel32.GetCurrentThreadId()
+            fg_tid = user32.GetWindowThreadProcessId(fg, None) if fg else 0
+            attached = False
+            if fg_tid and fg_tid != cur_tid:
+                attached = bool(user32.AttachThreadInput(cur_tid, fg_tid, True))
+            try:
+                user32.SetForegroundWindow(hwnd)
+                user32.BringWindowToTop(hwnd)
+            finally:
+                if attached:
+                    user32.AttachThreadInput(cur_tid, fg_tid, False)
+        except Exception:
+            try:
+                user32.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
 
     def set_borderless(self) -> bool:
         """去掉标题栏并缩成小弹窗（居中显示），视觉上独立于主窗口。"""
@@ -544,20 +605,36 @@ class WindowHooks:
                 elif hid == 2:
                     self.show()
                 elif hid == 3:
-                    was_hidden = self._hidden or user32.IsIconic(self._last_hwnd or 0)
-                    self.import_from_hidden = was_hidden
-                    if was_hidden:
+                    # 不能只靠 hide() 记下的句柄判断状态：点任务栏最小化从没
+                    # 走过 hide()，_last_hwnd 恒为 0，IsIconic(0) 也就恒为假，
+                    # 结果窗口不恢复，导入框弹在最小化窗口里、用户根本看不见。
+                    # 只读后台缓存的句柄：这里不能调 _find_main()（见 start 注释）
+                    hwnd = self._last_hwnd
+                    iconic = bool(hwnd) and bool(user32.IsIconic(hwnd))
+                    hidden = self._hidden or (bool(hwnd) and
+                                             not user32.IsWindowVisible(hwnd))
+                    # 只有显式 Alt+F1 隐藏才在关掉导入框后自动藏回去；最小化
+                    # 不是隐藏，否则会变成「最小化按热键 → 关框 → 窗口消失」。
+                    from_hidden = self._hidden
+                    self.import_from_hidden = from_hidden
+                    if iconic or hidden:
                         self.show()
-                    # 直接调前端打开导入框（秒弹，不走轮询避免双重触发）。
-                    # 放到独立线程只为防极端情况（长跑后渲染进程挂起）锁死消息循环，
-                    # 逻辑与原来完全一致。
-                    def _fire():
+                    # 走前端唯一入口 hotkeyOpenImport：导入框已开着时它会把焦点
+                    # 还给输入框；直调 openImportDialog 会被 isModalOpen() 直接
+                    # return，连按热键看起来就是「按了没反应」。
+                    # 放独立线程只防极端情况锁死消息循环，语义不变。
+                    flag = 'true' if from_hidden else 'false'
+                    script = ('window._importFromHidden=%s;'
+                              'typeof hotkeyOpenImport==="function"'
+                              ' ? hotkeyOpenImport(%s)'
+                              ' : (openImportDialog && openImportDialog())'
+                              % (flag, flag))
+
+                    def _fire(_script=script):
                         try:
                             import webview as _wv
                             if _wv.windows:
-                                flag = 'true' if was_hidden else 'false'
-                                _wv.windows[0].evaluate_js(
-                                    f'window._importFromHidden={flag};openImportDialog&&openImportDialog()')
+                                _wv.windows[0].evaluate_js(_script)
                         except Exception:
                             self.import_requested = True  # 回退：走轮询
                     threading.Thread(target=_fire, daemon=True, name='lrs-import-js').start()
