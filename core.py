@@ -59,6 +59,8 @@ DEFAULT_CONFIG = {
     'hotkey_show': 'Alt+F2',   # 还原窗口
     'manual_stop_cooldown': 0, # 手动停止后暂停监测时长（分钟），0=不限制
     'hotkey_import': 'Alt+1',  # 打开导入框的快捷键
+    'disk_warn_gb': 10,        # 剩余空间告警线（GB），只记日志不停机
+    'disk_stop_gb': 2,         # 剩余空间停止线（GB），收尾后退出整个程序
 }
 
 
@@ -980,6 +982,10 @@ class Engine:
         self.pool = ThreadPoolExecutor(max_workers=max(2, self.cfg['concurrency']),
                                        thread_name_prefix='probe')
         self._shutting_down = False       # 退出收尾中：禁止后台线程再写 rooms.json
+        self._disk_warned = False         # 空间告警只记一次，恢复后重置
+        self._disk_exiting = False        # 已触发空间不足退出，避免重复回调
+        self._disk_checked = 0.0          # 上次磁盘检测时间（循环里节流）
+        self.on_low_disk = None           # app 注入：写 log 后退出整个程序
         self._load_rooms()
         # 目录归档放后台线程：上千房间逐个探测旧目录会拖慢启动好几秒，
         # 先把窗口亮出来，归档悄悄做完即可（失败只记日志）
@@ -1282,7 +1288,8 @@ class Engine:
                 except Exception:
                     pass
         self.processes.clear()
-        # 尽力转 mp4，超出预算就放弃（保留 ts，下次可手动转）
+        # 退出前强制转 mp4（用户约定）：超时保护放宽到 budget，逐个转完为止
+        converted = 0
         for rid, _ in items:
             if time.time() > deadline + budget:
                 self.log('warn', '退出时限已到，剩余文件保留为 ts')
@@ -1292,9 +1299,16 @@ class Engine:
                 rel = r.file if r else ''
             if rel:
                 try:
-                    self._remux(rid, rel)
+                    if self._remux(rid, rel).get('ok'):
+                        converted += 1
                 except Exception:
                     pass
+        if converted:
+            self.log('ok', f'退出前已转 {converted} 个 mp4')
+        # 清掉 ffmpeg 写不进去时留下的 0 字节空壳（空间不足触发的退出必须清）
+        n = self._cleanup_empty_ts()
+        if n:
+            self.log('info', f'已清理 {n} 个 0 字节 ts 空文件')
 
     def stop(self):
         with self.lock:
@@ -1314,6 +1328,13 @@ class Engine:
     def _loop(self):
         while not self.stop_event.is_set():
             try:
+                # 磁盘守护：每 5 秒一次，跨平台；stop 会置 stop_event 本轮退出
+                now_disk = time.time()
+                if now_disk - self._disk_checked >= 5:
+                    self._disk_checked = now_disk
+                    self.check_disk()
+                if self._disk_exiting:
+                    break
                 self._watch_processes()
                 now = time.time()
                 due = []
@@ -1389,6 +1410,8 @@ class Engine:
         从不检查 ffmpeg 是否还活着。
         """
         now = time.time()
+        if self.check_disk() == 'stop':
+            return
         dead, stalled, rotate = [], [], []
         with self.lock:
             for rid, proc in list(self.processes.items()):
@@ -1627,6 +1650,68 @@ class Engine:
         p = Path(raw)
         return p if p.is_absolute() else (self.base / p)
 
+    # ---------- 磁盘空间守护 ----------
+    def disk_free_gb(self) -> float | None:
+        """录制盘剩余空间（GB）。检测失败返回 None —— 绝不因探测失败误触发退出。"""
+        try:
+            root = self.save_root()
+            probe = root if root.exists() else (root.parent if root.parent.exists() else self.base)
+            return shutil.disk_usage(probe).free / (1024 ** 3)
+        except Exception:
+            return None
+
+    def _cleanup_empty_ts(self) -> int:
+        """清理 0 字节 ts：ffmpeg 写不进去时只留下空壳，退出前一律清掉。"""
+        root = self.save_root()
+        if not root.is_dir():
+            return 0
+        n = 0
+        try:
+            for p in root.rglob('*.ts'):
+                try:
+                    if p.is_file() and p.stat().st_size == 0:
+                        p.unlink()
+                        n += 1
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return n
+
+    def check_disk(self, force: bool = False) -> str:
+        """返回 ok / warn / stop。stop 时只触发一次退出回调，不在这里 os._exit。"""
+        if self._disk_exiting:
+            return 'stop'
+        free = self.disk_free_gb()
+        if free is None:
+            return 'ok'
+        warn = max(0.1, float(self.cfg.get('disk_warn_gb', 10)))
+        stop = max(0.05, float(self.cfg.get('disk_stop_gb', 2)))
+        if free <= stop:
+            self._disk_exiting = True
+            self.running = False
+            self.stop_event.set()
+            self.log('error', f'录制盘剩余 {free:.2f} GB ≤ {stop} GB，'
+                              f'停止监测并退出（退出前会转 mp4、清空文件）')
+            # 日志要落盘：Engine.log 只在内存，quit.log 由 app 回调写
+            cb = self.on_low_disk
+            if callable(cb):
+                try:
+                    cb(f'LOW_DISK · 剩余 {free:.2f} GB ≤ {stop} GB')
+                except Exception:
+                    pass
+            return 'stop'
+        if free <= warn:
+            if not self._disk_warned:
+                self._disk_warned = True
+                self.log('warn', f'录制盘剩余空间不足 {free:.2f} GB '
+                                 f'(告警线 {warn} GB / 停止线 {stop} GB)，请尽快清理')
+            return 'warn'
+        if self._disk_warned:
+            self._disk_warned = False
+            self.log('ok', f'录制盘空间已恢复：{free:.2f} GB')
+        return 'ok'
+
     def _room_dir(self, r: Room) -> Path:
         """录制目录：<保存位置>/<平台>/<主播名>，同一主播的不同平台互不混淆。"""
         safe = _safe_dir_name(r.display_name or r.id)
@@ -1833,6 +1918,8 @@ class Engine:
         return {'ok': True, 'path': str(p), 'count': len(lines)}
 
     def _start_record(self, r: Room, stream_url: str):
+        if self.check_disk() == 'stop':
+            return                      # 空间不足：不开新录制，避免又留 0 字节 ts
         ffmpeg = shutil.which('ffmpeg')
         if not ffmpeg:
             r.status = 'error'

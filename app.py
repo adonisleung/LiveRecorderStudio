@@ -957,6 +957,21 @@ def main():
         return
 
     ENGINE = Engine()
+
+    # 磁盘空间不足：必须写 log 再退出整个程序（不能静默 os._exit）
+    def _on_low_disk(reason: str):
+        _quit_trace(reason)
+        _quit_trace('LOW_DISK · writing pending logs then exit')
+        # 内存日志也落一份到 quit.log，方便事后定位
+        try:
+            for line in list(ENGINE.logs)[-20:]:
+                _quit_trace(f"  [{line.get('t')}] {line.get('level')} {str(line.get('text'))[:160]}")
+        except Exception:
+            pass
+        request_quit()
+
+    ENGINE.on_low_disk = _on_low_disk
+
     # 端口固定从 8765 起步动态分配（或显式 --port），不读 config 里的 port：
     # 那个字段会被历史漂移污染（如 8792），一旦固化，pick_port 起跳点
     # 就与 find_running_instance 的探测范围失配，导致多实例检测失效。
