@@ -60,7 +60,8 @@ DEFAULT_CONFIG = {
     'manual_stop_cooldown': 0, # 手动停止后暂停监测时长（分钟），0=不限制
     'hotkey_import': 'Alt+1',  # 打开导入框的快捷键
     'disk_warn_gb': 10,        # 剩余空间告警线（GB），只记日志不停机
-    'disk_stop_gb': 2,         # 剩余空间停止线（GB），收尾后退出整个程序
+    'disk_stop_gb': 2,         # 低空间线（GB）：只告警，不退出程序
+    'disk_record_min_gb': 1,   # 开录最低空间（GB）：低于此拒绝开录、跳过本轮
 }
 
 
@@ -983,9 +984,7 @@ class Engine:
                                        thread_name_prefix='probe')
         self._shutting_down = False       # 退出收尾中：禁止后台线程再写 rooms.json
         self._disk_warned = False         # 空间告警只记一次，恢复后重置
-        self._disk_exiting = False        # 已触发空间不足退出，避免重复回调
         self._disk_checked = 0.0          # 上次磁盘检测时间（循环里节流）
-        self.on_low_disk = None           # app 注入：写 log 后退出整个程序
         self._load_rooms()
         # 目录归档放后台线程：上千房间逐个探测旧目录会拖慢启动好几秒，
         # 先把窗口亮出来，归档悄悄做完即可（失败只记日志）
@@ -1328,13 +1327,11 @@ class Engine:
     def _loop(self):
         while not self.stop_event.is_set():
             try:
-                # 磁盘守护：每 5 秒一次，跨平台；stop 会置 stop_event 本轮退出
+                # 磁盘告警：每 5 秒一次，只记日志不退出
                 now_disk = time.time()
                 if now_disk - self._disk_checked >= 5:
                     self._disk_checked = now_disk
                     self.check_disk()
-                if self._disk_exiting:
-                    break
                 self._watch_processes()
                 now = time.time()
                 due = []
@@ -1410,8 +1407,7 @@ class Engine:
         从不检查 ffmpeg 是否还活着。
         """
         now = time.time()
-        if self.check_disk() == 'stop':
-            return
+        self.check_disk()
         dead, stalled, rotate = [], [], []
         with self.lock:
             for rid, proc in list(self.processes.items()):
@@ -1679,33 +1675,22 @@ class Engine:
         return n
 
     def check_disk(self, force: bool = False) -> str:
-        """返回 ok / warn / stop。stop 时只触发一次退出回调，不在这里 os._exit。"""
-        if self._disk_exiting:
-            return 'stop'
+        """返回 ok / warn。只告警，绝不因为空间不足退出程序或停止监测。
+
+        低空间的处理策略是「开录时在 _start_record 闸门处跳过该房间本轮」，
+        程序继续运行——长测中磁盘满不该把整个监测进程关掉。
+        """
         free = self.disk_free_gb()
         if free is None:
             return 'ok'
         warn = max(0.1, float(self.cfg.get('disk_warn_gb', 10)))
-        stop = max(0.05, float(self.cfg.get('disk_stop_gb', 2)))
-        if free <= stop:
-            self._disk_exiting = True
-            self.running = False
-            self.stop_event.set()
-            self.log('error', f'录制盘剩余 {free:.2f} GB ≤ {stop} GB，'
-                              f'停止监测并退出（退出前会转 mp4、清空文件）')
-            # 日志要落盘：Engine.log 只在内存，quit.log 由 app 回调写
-            cb = self.on_low_disk
-            if callable(cb):
-                try:
-                    cb(f'LOW_DISK · 剩余 {free:.2f} GB ≤ {stop} GB')
-                except Exception:
-                    pass
-            return 'stop'
+        low = max(0.05, float(self.cfg.get('disk_stop_gb', 2)))
         if free <= warn:
             if not self._disk_warned:
                 self._disk_warned = True
                 self.log('warn', f'录制盘剩余空间不足 {free:.2f} GB '
-                                 f'(告警线 {warn} GB / 停止线 {stop} GB)，请尽快清理')
+                                 f'(告警线 {warn} GB / 低空间线 {low} GB)，'
+                                 f'低于 {self.cfg.get("disk_record_min_gb", 1)} GB 将跳过开录')
             return 'warn'
         if self._disk_warned:
             self._disk_warned = False
@@ -1918,8 +1903,14 @@ class Engine:
         return {'ok': True, 'path': str(p), 'count': len(lines)}
 
     def _start_record(self, r: Room, stream_url: str):
-        if self.check_disk() == 'stop':
-            return                      # 空间不足：不开新录制，避免又留 0 字节 ts
+        # 开录闸门：剩余不足 disk_record_min_gb 就跳过本轮，不创建文件、不留空壳。
+        # 房间状态保持 live，下一轮调度会重试；空间恢复后自动继续，全程不退程序。
+        free = self.disk_free_gb()
+        min_gb = max(0.05, float(self.cfg.get('disk_record_min_gb', 1)))
+        if free is not None and free < min_gb:
+            self.log('warn', f'[{r.anchor or r.display_name}] 录制盘仅剩 {free:.2f} GB '
+                             f'< {min_gb} GB，跳过本轮开录（空间恢复后自动继续）')
+            return
         ffmpeg = shutil.which('ffmpeg')
         if not ffmpeg:
             r.status = 'error'
